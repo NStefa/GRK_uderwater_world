@@ -1,0 +1,35 @@
+# Pliki binarne i kompilacja
+Debug/
+Release/
+x64/
+x86/
+*.exe
+*.obj
+*.pdb
+*.idb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.log
+*.tlog
+*.recipe
+*.cache
+
+# Visual Studio
+.vs/
+*.user
+*.aps
+*.ncb
+*.suo
+*.sdf
+ipch/
+
+# Biblioteki - każdy ma lokalnie
+dependencies/
+
+# Zbędne pliki
+img/
+*.html
+*.css
+*.md.bak
