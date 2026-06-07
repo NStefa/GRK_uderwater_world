@@ -7,8 +7,15 @@ Projekt na przedmiot Grafika Komputerowa.
 - Michał Sterczyński
 - Mateusz Zaręba
 
-## Metody
+## Metody obowiązkowe
+- Normal Mapping
+- PBR Lighting
+- Quaternion Camera Control
+- Shadow Mapping
+- Parallel Transport Frames
+- Underwater Skybox/Cubemap
 
+## Metody dodatkowe
 - A14 - Flow-map driven underwater current distortion
 - B09 - Ładowanie i wyświetlanie modeli OBJ
 
@@ -16,5 +23,7 @@ Projekt na przedmiot Grafika Komputerowa.
 
 1. Sklonuj repozytorium
 2. Skopiuj folder `dependencies` do głównego folderu projektu
-3. Otwórz `underwater\_world\\underwater\_world.sln` w Visual Studio 2022+
+   - opcja A: pobierz z Google Drive: https://drive.google.com/drive/folders/1z2e5KhtTqW_80CQfWOUV8STVeHY5R1rg?usp=sharing
+   - opcja B: skopiuj bezpośrednio z projektów ćwiczeniowych
+3. Otwórz `underwater_world\underwater_world.sln` w Visual Studio 2022+
 4. Skompiluj i uruchom
