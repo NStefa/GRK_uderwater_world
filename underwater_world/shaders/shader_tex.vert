@@ -5,8 +5,14 @@ layout(location = 1) in vec3 vertexNormal;
 layout(location = 2) in vec2 vertexTexCoord;
 
 uniform mat4 transformation;
+uniform mat4 modelMatrix;
+
+out vec2 texCoord;
+out vec3 worldNormal;
 
 void main()
 {
     gl_Position = transformation * vec4(vertexPosition, 1.0);
+    texCoord = vertexTexCoord;
+    worldNormal = normalize((modelMatrix * vec4(vertexNormal, 0.0)).xyz);
 }

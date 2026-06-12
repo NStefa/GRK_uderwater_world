@@ -5,6 +5,8 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#include <vector>
+#include <string>
 
 #define BUFFER_OFFSET(i) ((char *)NULL + (i))
 
@@ -69,4 +71,6 @@ namespace Core
 	void DrawVertexArray(const VertexData & data);
 
 	void DrawContext(RenderContext& context);
+	GLuint loadTexture(const char* path);
+	GLuint loadCubemap(std::vector<std::string> faces);
 }
