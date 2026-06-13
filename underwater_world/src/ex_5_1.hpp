@@ -147,12 +147,12 @@ void renderScene(GLFWwindow* window)
     float time = glfwGetTime();
     updateDeltaTime(time);
 
-    drawSkybox();
-
     Core::RenderContext planeCtx;
     planeCtx.vertexArray = planeVAO;
     planeCtx.size = 6;
     drawObjectTexture(planeCtx, glm::mat4(1.0f), floorTexture);
+
+    drawSkybox();
 
     glfwSwapBuffers(window);
 }
@@ -183,12 +183,12 @@ void init(GLFWwindow* window)
     glBindVertexArray(0);
 
     std::vector<std::string> faces = {
-    "textures/skybox/right.jpg",
-    "textures/skybox/left.jpg",
-    "textures/skybox/top.jpg",
-    "textures/skybox/bottom.jpg",
-    "textures/skybox/front.jpg",
-    "textures/skybox/back.jpg"
+    "textures/skybox/px.png",
+    "textures/skybox/nx.png",
+    "textures/skybox/py.png",
+    "textures/skybox/ny.png",
+    "textures/skybox/pz.png",
+    "textures/skybox/nz.png"
     };
     skyboxTexture = Core::loadCubemap(faces);
 
