@@ -29,7 +29,9 @@ GLuint skyboxTexture;
 Core::Shader_Loader shaderLoader;
 
 glm::vec3 cameraPos = glm::vec3(-4.f, 0, 0);
-glm::vec3 cameraDir = glm::vec3(1.f, 0.f, 0.f);
+glm::quat cameraOrientation = glm::quat(1.f, 0.f, 0.f, 0.f);
+float cameraYaw = 0.f;
+float cameraPitch = 0.f;
 glm::vec3 lightColor = glm::vec3(1.f, 1.f, 1.f);
 glm::vec3 lightDir = glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f));
 
@@ -62,18 +64,43 @@ void updateDeltaTime(float time) {
     lastTime = time;
 }
 
+bool resetMouseAnchor = true;
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+    static double lastX = xpos;
+    static double lastY = ypos;
+
+    if (resetMouseAnchor) {
+        lastX = xpos;
+        lastY = ypos;
+        resetMouseAnchor = false;
+    }
+
+    float xoffset = (float)(xpos - lastX);
+    float yoffset = (float)(ypos - lastY);
+    lastX = xpos;
+    lastY = ypos;
+
+    const float sensitivity = 0.0025f;
+    cameraYaw -= xoffset * sensitivity;
+    cameraPitch -= yoffset * sensitivity;
+
+    // ograniczenie pitch tak, aby kamera nie przekrecila sie "przez glowe"
+    const float pitchLimit = glm::half_pi<float>() - 0.01f;
+    cameraPitch = glm::clamp(cameraPitch, -pitchLimit, pitchLimit);
+
+    // yaw obraca wokol osi Y swiata, pitch wokol osi X lokalnej kamery (po zastosowaniu yaw)
+    glm::quat yawQuat = glm::angleAxis(cameraYaw, glm::vec3(0.f, 1.f, 0.f));
+    glm::quat pitchQuat = glm::angleAxis(cameraPitch, glm::vec3(1.f, 0.f, 0.f));
+    cameraOrientation = yawQuat * pitchQuat;
+}
+
 glm::mat4 createCameraMatrix()
 {
-    glm::vec3 cameraSide = glm::normalize(glm::cross(cameraDir, glm::vec3(0.f, 1.f, 0.f)));
-    glm::vec3 cameraUp = glm::normalize(glm::cross(cameraSide, cameraDir));
-    glm::mat4 cameraRotrationMatrix = glm::mat4({
-        cameraSide.x, cameraSide.y, cameraSide.z, 0,
-        cameraUp.x, cameraUp.y, cameraUp.z, 0,
-        -cameraDir.x, -cameraDir.y, -cameraDir.z, 0,
-        0., 0., 0., 1.,
-        });
-    cameraRotrationMatrix = glm::transpose(cameraRotrationMatrix);
-    return cameraRotrationMatrix * glm::translate(-cameraPos);
+    glm::vec3 forward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
+    glm::vec3 up = glm::rotate(cameraOrientation, glm::vec3(0.f, 1.f, 0.f));
+    return Core::createViewMatrix(cameraPos, forward, up);
 }
 
 glm::mat4 createPerspectiveMatrix()
@@ -166,6 +193,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 void init(GLFWwindow* window)
 {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glEnable(GL_DEPTH_TEST);
 
     program = shaderLoader.CreateProgram("shaders/shader_5_1.vert", "shaders/shader_5_1.frag");
@@ -234,6 +263,16 @@ void shutdown(GLFWwindow* window)
 
 void processInput(GLFWwindow* window)
 {
+    static bool tabWasPressed = false;
+    bool tabPressed = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+    if (tabPressed && !tabWasPressed) {
+        int currentMode = glfwGetInputMode(window, GLFW_CURSOR);
+        bool willDisable = currentMode != GLFW_CURSOR_DISABLED;
+        glfwSetInputMode(window, GLFW_CURSOR, willDisable ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+        if (willDisable) resetMouseAnchor = true;
+    }
+    tabWasPressed = tabPressed;
+
     glm::vec3 spaceshipSide = glm::normalize(glm::cross(spaceshipDir, glm::vec3(0.f, 1.f, 0.f)));
     glm::vec3 spaceshipUp = glm::vec3(0.f, 1.f, 0.f);
     float angleSpeed = 0.05f * deltaTime * 60;
@@ -262,7 +301,6 @@ void processInput(GLFWwindow* window)
         spaceshipDir = glm::vec3(glm::eulerAngleY(-angleSpeed) * glm::vec4(spaceshipDir, 0));
 
     cameraPos = spaceshipPos - 0.3f * spaceshipDir + glm::vec3(0, 1, 0) * 0.1f;
-    cameraDir = spaceshipDir;
 }
 
 void renderLoop(GLFWwindow* window) {
