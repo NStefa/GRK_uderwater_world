@@ -21,8 +21,11 @@ GLuint skyboxProgram;
 GLuint skyboxVAO, skyboxVBO;
 
 GLuint texProgram;
+GLuint flowmapProgram;
 GLuint planeVAO, planeVBO, planeEBO;
 GLuint floorTexture;
+GLuint flowmapTexture;
+GLuint sandTexture;
 
 GLuint skyboxTexture;
 
@@ -83,7 +86,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     cameraYaw -= xoffset * sensitivity;
     cameraPitch -= yoffset * sensitivity;
 
-    // ograniczenie pitch do +/-89 stopni, aby kamera nie przekrecila sie "przez glowe"
+    // ograniczenie pitch do +/-89 stopni
     const float pitchLimit = glm::radians(89.f);
     cameraPitch = glm::clamp(cameraPitch, -pitchLimit, pitchLimit);
 
@@ -146,6 +149,31 @@ void drawObjectTexture(Core::RenderContext& context, glm::mat4 modelMatrix, GLui
     glUseProgram(0);
 }
 
+void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex) {
+    glUseProgram(flowmapProgram);
+    glm::mat4 viewProjectionMatrix = createPerspectiveMatrix() * createCameraMatrix();
+    glm::mat4 transformation = viewProjectionMatrix * modelMatrix;
+    glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
+    glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "modelMatrix"), 1, GL_FALSE, (float*)&modelMatrix);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "lightDir"), lightDir.x, lightDir.y, lightDir.z);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform1f(glGetUniformLocation(flowmapProgram, "time"), (float)glfwGetTime());
+    glUniform1f(glGetUniformLocation(flowmapProgram, "speed"), 0.15f);
+    glUniform1f(glGetUniformLocation(flowmapProgram, "flowScale"), 0.2f);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, flowMap);
+    glUniform1i(glGetUniformLocation(flowmapProgram, "flowMap"), 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glUniform1i(glGetUniformLocation(flowmapProgram, "colorTexture"), 1);
+
+    Core::DrawContext(context);
+    glUseProgram(0);
+}
+
 void drawSkybox()
 {
     glDepthFunc(GL_LEQUAL);
@@ -166,7 +194,7 @@ void drawSkybox()
 
 void renderScene(GLFWwindow* window)
 {
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.0f, 0.15f, 0.25f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     float time = glfwGetTime();
     updateDeltaTime(time);
@@ -174,7 +202,7 @@ void renderScene(GLFWwindow* window)
     Core::RenderContext planeCtx;
     planeCtx.vertexArray = planeVAO;
     planeCtx.size = 6;
-    drawObjectTexture(planeCtx, glm::mat4(1.0f), floorTexture);
+    drawFlowmap(planeCtx, glm::mat4(1.0f), flowmapTexture, sandTexture);
 
     drawSkybox();
 
@@ -197,6 +225,7 @@ void init(GLFWwindow* window)
     program = shaderLoader.CreateProgram("shaders/shader_5_1.vert", "shaders/shader_5_1.frag");
     skyboxProgram = shaderLoader.CreateProgram("shaders/shader_skybox.vert", "shaders/shader_skybox.frag");
     texProgram = shaderLoader.CreateProgram("shaders/shader_tex.vert", "shaders/shader_tex.frag");
+    flowmapProgram = shaderLoader.CreateProgram("shaders/shader_flowmap.vert", "shaders/shader_flowmap.frag");
 
     // Skybox VAO
     glGenVertexArrays(1, &skyboxVAO);
@@ -219,11 +248,11 @@ void init(GLFWwindow* window)
     skyboxTexture = Core::loadCubemap(faces);
 
     float planeVertices[] = {
-        // pozycja              // normal          // uv
-        -2.0f, -0.5f, -2.0f,   0.f, 1.f, 0.f,    0.0f, 0.0f,
-         2.0f, -0.5f, -2.0f,   0.f, 1.f, 0.f,    1.0f, 0.0f,
-         2.0f, -0.5f,  2.0f,   0.f, 1.f, 0.f,    1.0f, 1.0f,
-        -2.0f, -0.5f,  2.0f,   0.f, 1.f, 0.f,    0.0f, 1.0f,
+        // pozycja                // normal          // uv (0..20 - tekstura kafle sie 20 razy)
+        -50.0f, -1.0f, -50.0f,   0.f, 1.f, 0.f,    0.0f,  0.0f,
+         50.0f, -1.0f, -50.0f,   0.f, 1.f, 0.f,    20.0f, 0.0f,
+         50.0f, -1.0f,  50.0f,   0.f, 1.f, 0.f,    20.0f, 20.0f,
+        -50.0f, -1.0f,  50.0f,   0.f, 1.f, 0.f,    0.0f,  20.0f,
     };
     unsigned int planeIndices[] = { 0,1,2,  0,2,3 };
 
@@ -249,13 +278,16 @@ void init(GLFWwindow* window)
 
     glBindVertexArray(0);
 
-    floorTexture = Core::loadTexture("textures/flowmap.png");
+    floorTexture = Core::loadTexture("textures/sand.png");
+    flowmapTexture = Core::loadTexture("textures/flowmap.png");
+    sandTexture = Core::loadTexture("textures/sand.png");
 }
 
 void shutdown(GLFWwindow* window)
 {
     shaderLoader.DeleteProgram(program);
     shaderLoader.DeleteProgram(skyboxProgram);
+    shaderLoader.DeleteProgram(flowmapProgram);
 }
 
 void processInput(GLFWwindow* window)
@@ -294,6 +326,11 @@ void processInput(GLFWwindow* window)
         cameraPos += up * moveSpeed;
     if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
         cameraPos -= up * moveSpeed;
+
+    // nie wyjchodzi ponizej dna (podloga jest na y = -1.0)
+    const float floorY = -1.0f;
+    const float cameraHeight = 0.2f;
+    cameraPos.y = glm::max(cameraPos.y, floorY + cameraHeight);
 }
 
 void renderLoop(GLFWwindow* window) {

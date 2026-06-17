@@ -19,7 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Camera.h" />
-    <ClInclude Include="src\ex_5_1.hpp" />
+    <ClInclude Include="src\underwater_scene.hpp" />
     <ClInclude Include="src\objload.h" />
     <ClInclude Include="src\Render_Utils.h" />
     <ClInclude Include="src\Shader_Loader.h" />
@@ -27,12 +27,12 @@
   <ItemGroup>
     <None Include="shaders\shader_5_1.frag" />
     <None Include="shaders\shader_5_1.vert" />
-    <None Include="shaders\shader_5_sun.frag" />
-    <None Include="shaders\shader_5_sun.vert" />
+    <None Include="shaders\shader_flowmap.frag" />
+    <None Include="shaders\shader_flowmap.vert" />
+    <None Include="shaders\shader_skybox.frag" />
+    <None Include="shaders\shader_skybox.vert" />
     <None Include="shaders\shader_tex.frag" />
     <None Include="shaders\shader_tex.vert" />
-    <None Include="shader_skybox.frag" />
-    <None Include="shader_skybox.vert" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{7B84D06D-946D-4DCB-BD1A-B5635B0F83F0}</ProjectGuid>

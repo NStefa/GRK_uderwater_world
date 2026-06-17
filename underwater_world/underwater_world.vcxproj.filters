@@ -47,27 +47,27 @@
     <ClInclude Include="src\Camera.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\ex_5_1.hpp">
+    <ClInclude Include="src\underwater_scene.hpp">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\shader_5_1.vert">
-      <Filter>Shader Files</Filter>
-    </None>
-    <None Include="shaders\shader_5_sun.frag">
-      <Filter>Shader Files</Filter>
-    </None>
-    <None Include="shaders\shader_5_sun.vert">
-      <Filter>Shader Files</Filter>
-    </None>
     <None Include="shaders\shader_5_1.frag">
       <Filter>Shader Files</Filter>
     </None>
-    <None Include="shader_skybox.vert">
+    <None Include="shaders\shader_5_1.vert">
       <Filter>Shader Files</Filter>
     </None>
-    <None Include="shader_skybox.frag">
+    <None Include="shaders\shader_flowmap.frag">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="shaders\shader_flowmap.vert">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="shaders\shader_skybox.frag">
+      <Filter>Shader Files</Filter>
+    </None>
+    <None Include="shaders\shader_skybox.vert">
       <Filter>Shader Files</Filter>
     </None>
     <None Include="shaders\shader_tex.frag">
