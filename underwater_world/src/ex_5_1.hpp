@@ -35,9 +35,6 @@ float cameraPitch = 0.f;
 glm::vec3 lightColor = glm::vec3(1.f, 1.f, 1.f);
 glm::vec3 lightDir = glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f));
 
-glm::vec3 spaceshipPos = glm::vec3(-4.f, 0, 0);
-glm::vec3 spaceshipDir = glm::vec3(1.f, 0.f, 0.f);
-
 float aspectRatio = 1.f;
 float lastTime = -1.f;
 float deltaTime = 0.f;
@@ -86,8 +83,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     cameraYaw -= xoffset * sensitivity;
     cameraPitch -= yoffset * sensitivity;
 
-    // ograniczenie pitch tak, aby kamera nie przekrecila sie "przez glowe"
-    const float pitchLimit = glm::half_pi<float>() - 0.01f;
+    // ograniczenie pitch do +/-89 stopni, aby kamera nie przekrecila sie "przez glowe"
+    const float pitchLimit = glm::radians(89.f);
     cameraPitch = glm::clamp(cameraPitch, -pitchLimit, pitchLimit);
 
     // yaw obraca wokol osi Y swiata, pitch wokol osi X lokalnej kamery (po zastosowaniu yaw)
@@ -273,34 +270,30 @@ void processInput(GLFWwindow* window)
     }
     tabWasPressed = tabPressed;
 
-    glm::vec3 spaceshipSide = glm::normalize(glm::cross(spaceshipDir, glm::vec3(0.f, 1.f, 0.f)));
-    glm::vec3 spaceshipUp = glm::vec3(0.f, 1.f, 0.f);
-    float angleSpeed = 0.05f * deltaTime * 60;
-    float moveSpeed = 0.05f * deltaTime * 60;
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-        angleSpeed *= 3;
-        moveSpeed *= 3;
-    }
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        spaceshipPos += spaceshipDir * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        spaceshipPos -= spaceshipDir * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
-        spaceshipPos += spaceshipSide * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
-        spaceshipPos -= spaceshipSide * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-        spaceshipPos += spaceshipUp * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-        spaceshipPos -= spaceshipUp * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        spaceshipDir = glm::vec3(glm::eulerAngleY(angleSpeed) * glm::vec4(spaceshipDir, 0));
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        spaceshipDir = glm::vec3(glm::eulerAngleY(-angleSpeed) * glm::vec4(spaceshipDir, 0));
 
-    cameraPos = spaceshipPos - 0.3f * spaceshipDir + glm::vec3(0, 1, 0) * 0.1f;
+    // lokalne osie kamery wyznaczone z kwaterniona orientacji
+    glm::vec3 forward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
+    glm::vec3 right = glm::rotate(cameraOrientation, glm::vec3(1.f, 0.f, 0.f));
+    glm::vec3 up = glm::vec3(0.f, 1.f, 0.f);
+
+    float moveSpeed = 1.5f * deltaTime;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        moveSpeed *= 3.f;
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += forward * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= forward * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += right * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= right * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+        cameraPos += up * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+        cameraPos -= up * moveSpeed;
 }
 
 void renderLoop(GLFWwindow* window) {
