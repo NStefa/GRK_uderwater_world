@@ -20,9 +20,9 @@ void main()
     vec4 worldPosition = modelMatrix * vec4(vertexPosition, 1.0);
     gl_Position = transformation * vec4(vertexPosition, 1.0);
 
-    texCoord = vertexTexCoord;
+    texCoord       = vertexTexCoord;
     worldNormal    = normalize((modelMatrix * vec4(vertexNormal,    0.0)).xyz);
     worldTangent   = normalize((modelMatrix * vec4(vertexTangent,   0.0)).xyz);
     worldBitangent = normalize((modelMatrix * vec4(vertexBitangent, 0.0)).xyz);
-    worldPos = worldPosition.xyz;
+    worldPos       = worldPosition.xyz;
 }

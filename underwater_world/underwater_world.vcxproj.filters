@@ -52,12 +52,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\shader_5_1.frag">
-      <Filter>Shader Files</Filter>
-    </None>
-    <None Include="shaders\shader_5_1.vert">
-      <Filter>Shader Files</Filter>
-    </None>
     <None Include="shaders\shader_flowmap.frag">
       <Filter>Shader Files</Filter>
     </None>

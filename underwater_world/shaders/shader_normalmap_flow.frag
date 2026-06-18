@@ -7,8 +7,8 @@ in vec3 worldTangent;
 in vec3 worldBitangent;
 
 uniform sampler2D flowMap;
-uniform sampler2D colorTexture;
-uniform sampler2D normalMap;
+uniform sampler2D colorTexture;   // statyczny kolor skaly
+uniform sampler2D normalMap;      // flow-distorted normalna
 
 uniform vec3 lightDir;
 uniform vec3 lightColor;
@@ -24,27 +24,24 @@ out vec4 outColor;
 void main()
 {
     vec2 flowUV = texCoord * flowMapScale;
-    // Remap [0,1] -> [-1,1]: 0.5 = no flow, 0.0 = max left, 1.0 = max right
     vec2 flow = texture(flowMap, flowUV).rg * 2.0 - 1.0;
 
-    // Two phases offset by 0.5 to avoid a visible snap each cycle
     float phase0 = fract(time * speed);
     float phase1 = fract(time * speed + 0.5);
 
     vec2 uv0 = texCoord - flow * phase0 * flowScale;
     vec2 uv1 = texCoord - flow * phase1 * flowScale;
 
-    // Triangle wave blend: smoothly crossfades the two phases instead of snapping
     float blend = abs(phase0 * 2.0 - 1.0);
 
-    vec4 texColor = texture(colorTexture, texCoord);  // statyczny kolor
+    // kolor statyczny - nie porusza sie z flowmapa
+    vec4 texColor = texture(colorTexture, texCoord);
 
-    // sample normal map with same flow-distorted UVs and blend phases
+    // normalna flow-distorted - porusza sie jak woda po skale
     vec3 n0 = texture(normalMap, uv0).rgb * 2.0 - 1.0;
     vec3 n1 = texture(normalMap, uv1).rgb * 2.0 - 1.0;
     vec3 tangentNormal = normalize(mix(n0, n1, blend));
 
-    // TBN: tangent space → world space
     mat3 TBN = mat3(
         normalize(worldTangent),
         normalize(worldBitangent),
@@ -52,16 +49,21 @@ void main()
     );
     vec3 normal = normalize(TBN * tangentNormal);
 
-    // Phong lighting (ambient + diffuse)
-    float diff = max(dot(normal, normalize(lightDir)), 0.0);
-    vec3 ambient = 0.3 * lightColor;
-    vec3 diffuse = diff * lightColor;
-    vec3 litColor = (ambient + diffuse) * texColor.rgb;
+    vec3 view = normalize(cameraPos - worldPos);
+    vec3 refl = reflect(-normalize(lightDir), normal);
 
-    // Exponential underwater fog: exp(-dist * density), 1=no fog, 0=full fog
-    float dist = length(worldPos - cameraPos);
+    float diff = max(dot(normal, normalize(lightDir)), 0.0);
+    float spec = pow(max(dot(view, refl), 0.0), 32.0);
+
+    vec3 ambient  = 0.3 * lightColor;
+    vec3 diffuse  = diff * lightColor;
+    vec3 specular = 0.3 * spec * lightColor;
+
+    vec3 litColor = (ambient + diffuse + specular) * texColor.rgb;
+
+    float dist      = length(worldPos - cameraPos);
     float fogFactor = clamp(exp(-dist * 0.04), 0.0, 1.0);
-    vec3 fogColor = vec3(0.0, 0.15, 0.25);
+    vec3  fogColor  = vec3(0.0, 0.15, 0.25);
 
     outColor = vec4(mix(fogColor, litColor, fogFactor), texColor.a);
 }

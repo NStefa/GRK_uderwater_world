@@ -25,8 +25,6 @@
     <ClInclude Include="src\Shader_Loader.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\shader_5_1.frag" />
-    <None Include="shaders\shader_5_1.vert" />
     <None Include="shaders\shader_flowmap.frag" />
     <None Include="shaders\shader_flowmap.vert" />
     <None Include="shaders\shader_skybox.frag" />
