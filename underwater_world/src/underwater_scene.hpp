@@ -44,7 +44,7 @@ GLuint rockTexture;
 GLuint rockNormalTexture;
 
 // --- Kufer ---
-Core::RenderContext boxContext;
+std::vector<Core::RenderContext> boxMeshes;
 GLuint boxTexture;
 GLuint boxNormalTexture;
 
@@ -65,9 +65,16 @@ float aspectRatio = 1.f;
 float lastTime = -1.f;
 float deltaTime = 0.f;
 
-// --- Parametry flowmapy (sterowane klawiszami 1/2/3/4) ---
-float flowSpeed = 0.15f;
+// --- Parametry flowmapy ---
+const float FLOW_SPEED_DEFAULT = 0.05f;
+float flowSpeed = FLOW_SPEED_DEFAULT;
 float flowScale = 0.2f;
+
+// --- Animacja wieczka kufra ---
+float boxLidAngle  = 0.0f;   // aktualny kat otwarcia (0 = zamkniety, 110 = otwarty)
+bool  boxLidOpen   = false;   // cel: otwarty/zamkniety
+// pivot zawiasow w przestrzeni modelu (przed skalowaniem 0.02)
+const glm::vec3 BOX_LID_PIVOT = glm::vec3(-19.9f, 22.7f, 0.0f);
 
 float skyboxVertices[] = {
     -1.0f,  1.0f, -1.0f,   -1.0f, -1.0f, -1.0f,    1.0f, -1.0f, -1.0f,
@@ -231,10 +238,19 @@ void renderScene(GLFWwindow* window)
     planeCtx.size = 6;
     drawFlowmap(planeCtx, glm::mat4(1.0f), flowmapTexture, sandTexture, sandNormalTexture);
 
-    // kufer
-    glm::mat4 boxModel = glm::translate(glm::mat4(1.0f), glm::vec3(-1.f, -1.f, -5.f));
-    boxModel = glm::scale(boxModel, glm::vec3(0.02f));
-    drawNormalFlow(boxContext, boxModel, flowmapTexture, boxTexture, boxNormalTexture);
+    // kufer (wszystkie 15 czesci: dno, wieczko, zawiasy, zamek...)
+    glm::mat4 boxBase = glm::translate(glm::mat4(1.0f), glm::vec3(-1.f, -1.f, -5.f));
+    boxBase = glm::scale(boxBase, glm::vec3(0.02f));
+
+    // wieczko (mesh 14 = Top1): obrot wokol zawiasow
+    glm::mat4 lidRot = glm::translate(glm::mat4(1.0f),  BOX_LID_PIVOT)
+                     * glm::rotate(glm::mat4(1.0f), glm::radians(boxLidAngle), glm::vec3(0.0f, 0.0f, 1.0f))
+                     * glm::translate(glm::mat4(1.0f), -BOX_LID_PIVOT);
+
+    for (int i = 0; i < (int)boxMeshes.size(); i++) {
+        glm::mat4 meshModel = (i == 14) ? boxBase * lidRot : boxBase;
+        drawNormalFlow(boxMeshes[i], meshModel, flowmapTexture, boxTexture, boxNormalTexture);
+    }
 
     // skaly
     glm::mat4 rockModel = glm::translate(glm::mat4(1.0f), glm::vec3(3.f, -0.75f, -5.f));
@@ -277,6 +293,16 @@ static void loadMesh(const std::string& path, Core::RenderContext& ctx, int mesh
         ctx.initFromAssimpMesh(scene->mMeshes[meshIndex]);
     else
         std::cout << "Failed to load: " << path << " — " << importer.GetErrorString() << std::endl;
+}
+
+static void loadAllMeshes(const std::string& path, std::vector<Core::RenderContext>& meshes) {
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path,
+        aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace);
+    if (!scene) { std::cout << "Failed to load: " << path << " — " << importer.GetErrorString() << std::endl; return; }
+    meshes.resize(scene->mNumMeshes);
+    for (unsigned int i = 0; i < scene->mNumMeshes; i++)
+        meshes[i].initFromAssimpMesh(scene->mMeshes[i]);
 }
 
 void init(GLFWwindow* window)
@@ -338,7 +364,7 @@ void init(GLFWwindow* window)
     // modele
     loadMesh("models/ship/12219_boat_v2_L2.obj", wreckContext, 19); // mesh 19 = boat_body
     loadMesh("models/rock/sasso14.obj",           rockContext);
-    loadMesh("models/box/chest_low.obj",          boxContext);
+    loadAllMeshes("models/box/chest_low.obj",      boxMeshes);
 
     // tekstury
     flowmapTexture    = Core::loadTexture("textures/flowmap.png");
@@ -377,23 +403,40 @@ void processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // 1/2: predkosc flowmapy, 3/4: skala przesuniecia
-    static bool key1Was = false, key2Was = false, key3Was = false, key4Was = false;
+    // 1/2: predkosc flowmapy, 3/4: skala przesuniecia, R: reset do domyslnych
+    static bool key1Was = false, key2Was = false, key3Was = false, key4Was = false, keyRWas = false;
     bool key1 = glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS;
     bool key2 = glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS;
     bool key3 = glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS;
     bool key4 = glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS;
+    bool keyR = glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
+
     if (key1 && !key1Was) flowSpeed = glm::max(0.01f, flowSpeed - 0.05f);
     if (key2 && !key2Was) flowSpeed = glm::min(1.0f,  flowSpeed + 0.05f);
     if (key3 && !key3Was) flowScale = glm::max(0.01f, flowScale - 0.05f);
     if (key4 && !key4Was) flowScale = glm::min(1.0f,  flowScale + 0.05f);
-    key1Was = key1; key2Was = key2; key3Was = key3; key4Was = key4;
+    if (keyR && !keyRWas) { flowSpeed = FLOW_SPEED_DEFAULT; flowScale = 0.2f; }
 
-    if (key1 || key2 || key3 || key4) {
+    key1Was = key1; key2Was = key2; key3Was = key3; key4Was = key4; keyRWas = keyR;
+
+
+    // F: otworz/zamknij wieczko kufra
+    static bool keyFWas = false;
+    bool keyF = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
+    if (keyF && !keyFWas) boxLidOpen = !boxLidOpen;
+    keyFWas = keyF;
+
+    if (key1 || key2 || key3 || key4 || keyR) {
         char title[128];
         snprintf(title, sizeof(title), "Underwater | speed: %.2f  flowScale: %.2f", flowSpeed, flowScale);
         glfwSetWindowTitle(window, title);
     }
+
+    // animacja wieczka: plynne przejscie do celu (110 stopni = otwarte)
+    float lidTarget = boxLidOpen ? 110.0f : 0.0f;
+    float lidSpeed  = 90.0f * deltaTime; // stopni na sekunde
+    if (boxLidAngle < lidTarget) boxLidAngle = glm::min(boxLidAngle + lidSpeed, lidTarget);
+    if (boxLidAngle > lidTarget) boxLidAngle = glm::max(boxLidAngle - lidSpeed, lidTarget);
 
     // ruch kamery (WASD + QE, SHIFT = sprint)
     glm::vec3 forward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));

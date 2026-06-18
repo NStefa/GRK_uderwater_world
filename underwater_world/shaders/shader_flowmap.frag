@@ -37,7 +37,10 @@ void main()
     // Triangle wave blend: smoothly crossfades the two phases instead of snapping
     float blend = abs(phase0 * 2.0 - 1.0);
 
-    vec4 texColor = texture(colorTexture, texCoord);  // statyczny kolor
+    // kolor flow-distorted - przesuwa sie razem z normalną
+    vec4 c0 = texture(colorTexture, uv0);
+    vec4 c1 = texture(colorTexture, uv1);
+    vec4 texColor = mix(c0, c1, blend);
 
     // sample normal map with same flow-distorted UVs and blend phases
     vec3 n0 = texture(normalMap, uv0).rgb * 2.0 - 1.0;
