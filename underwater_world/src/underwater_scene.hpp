@@ -34,7 +34,7 @@ GLuint sandTexture;
 GLuint sandNormalTexture;
 
 // --- Wrak (statek) ---
-Core::RenderContext wreckContext;
+std::vector<Core::RenderContext> wreckMeshes;
 GLuint wreckTexture;
 GLuint metalNormalTexture;
 
@@ -47,6 +47,23 @@ GLuint rockNormalTexture;
 std::vector<Core::RenderContext> boxMeshes;
 GLuint boxTexture;
 GLuint boxNormalTexture;
+
+// --- Delfin ---
+Core::RenderContext dolphinContext;
+GLuint dolphinTexture;
+
+
+// --- Ryba ---
+Core::RenderContext fishContext;
+GLuint fishTexture;
+
+// --- Nurek ---
+std::vector<Core::RenderContext> diverMeshes;
+GLuint diverBodyTexture;
+
+// --- Koral ---
+Core::RenderContext coralContext;
+GLuint coralTexture;
 
 Core::Shader_Loader shaderLoader;
 
@@ -150,6 +167,7 @@ glm::mat4 createPerspectiveMatrix()
 
 // Rysuje plaszczyzne dna: kolor statyczny, normalna flow-distorted
 void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, GLuint normalTex, float flowMapScale = 0.05f) {
+    if (!context.vertexArray) return;
     glUseProgram(flowmapProgram);
     glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
     glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
@@ -180,6 +198,7 @@ void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flo
 
 // Rysuje obiekt 3D: kolor statyczny, normalna flow-distorted (skaly, wrak, kufer)
 void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, GLuint normalTex, float flowMapScale = 1.0f) {
+    if (!context.vertexArray) return;
     glUseProgram(normalFlowProgram);
     glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
     glUniformMatrix4fv(glGetUniformLocation(normalFlowProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
@@ -204,6 +223,21 @@ void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint 
     glBindTexture(GL_TEXTURE_2D, normalTex);
     glUniform1i(glGetUniformLocation(normalFlowProgram, "normalMap"), 2);
 
+    Core::DrawContext(context);
+    glUseProgram(0);
+}
+
+void drawTex(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint colorTex) {
+    if (!context.vertexArray) return;
+    glUseProgram(texProgram);
+    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
+    glUniformMatrix4fv(glGetUniformLocation(texProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
+    glUniformMatrix4fv(glGetUniformLocation(texProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
+    glUniform3f(glGetUniformLocation(texProgram, "lightDir"),   lightDir.x,   lightDir.y,   lightDir.z);
+    glUniform3f(glGetUniformLocation(texProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glUniform1i(glGetUniformLocation(texProgram, "colorTexture"), 0);
     Core::DrawContext(context);
     glUseProgram(0);
 }
@@ -266,12 +300,33 @@ void renderScene(GLFWwindow* window)
     glm::mat4 rockModel4 = glm::translate(glm::mat4(1.0f), glm::vec3(-4.f, -0.69f, -12.f));
     drawNormalFlow(rockContext, rockModel4, flowmapTexture, rockTexture, rockNormalTexture);
 
+    // delfin
+    glm::mat4 dolphinModel = glm::translate(glm::mat4(1.0f), glm::vec3(2.f, 0.f, -6.f));
+    dolphinModel = glm::scale(dolphinModel, glm::vec3(0.01f));
+    drawTex(dolphinContext, dolphinModel, dolphinTexture);
+
+    // ryba
+    glm::mat4 fishModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -0.5f, -4.f));
+    fishModel = glm::scale(fishModel, glm::vec3(0.01f));
+    drawTex(fishContext, fishModel, fishTexture);
+
+
+    // nurek (wszystkie czesci jedna tekstura body)
+    glm::mat4 diverModel = glm::translate(glm::mat4(1.0f), glm::vec3(-3.f, -0.5f, -6.f));
+    diverModel = glm::scale(diverModel, glm::vec3(0.5f));
+    for (auto& mesh : diverMeshes)
+        drawTex(mesh, diverModel, diverBodyTexture);
+
+    // koral (tymczasowo wylaczony)
+    // glm::mat4 coralModel = glm::translate(glm::mat4(1.0f), glm::vec3(1.f, -1.f, -8.f));
+    // coralModel = glm::scale(coralModel, glm::vec3(0.5f));
+    // drawTex(coralContext, coralModel, coralTexture);
+
     // wrak
-    glm::mat4 wreckModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -1.25f, -10.f));
-    wreckModel = glm::rotate(wreckModel, glm::radians(160.f), glm::vec3(1.f, 0.f, 0.f));
-    wreckModel = glm::scale(wreckModel, glm::vec3(0.007f));
-    wreckModel = glm::translate(wreckModel, glm::vec3(-39.f, 0.f, -556.f));
-    drawNormalFlow(wreckContext, wreckModel, flowmapTexture, wreckTexture, metalNormalTexture);
+    glm::mat4 wreckModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -1.f, -10.f));
+    wreckModel = glm::scale(wreckModel, glm::vec3(0.01f));
+    for (auto& mesh : wreckMeshes)
+        drawNormalFlow(mesh, wreckModel, flowmapTexture, wreckTexture, metalNormalTexture);
 
     drawSkybox();
 
@@ -362,20 +417,28 @@ void init(GLFWwindow* window)
     glBindVertexArray(0);
 
     // modele
-    loadMesh("models/ship/12219_boat_v2_L2.obj", wreckContext, 19); // mesh 19 = boat_body
+    loadAllMeshes("models/ship/Boat Texture 1.obj", wreckMeshes);
     loadMesh("models/rock/sasso14.obj",           rockContext);
     loadAllMeshes("models/box/chest_low.obj",      boxMeshes);
+    loadMesh("models/dolphin/10014_dolphin_v2_max2011_it2.obj", dolphinContext);
+    loadMesh("models/fish/12265_Fish_v1_L2.obj", fishContext);
+    loadAllMeshes("models/diver/Scuba Diver.obj", diverMeshes);
+    loadMesh("models/coral/SfM04_001b.obj", coralContext);
 
     // tekstury
     flowmapTexture    = Core::loadTexture("textures/flowmap.png");
     sandTexture       = Core::loadTexture("textures/sand/Ground080_4K-PNG_Color.png");
     sandNormalTexture = Core::loadTexture("textures/sand/Ground080_4K-PNG_NormalGL.png");
-    wreckTexture      = Core::loadTexture("models/ship/boat_body_diffuse.jpg");
+    wreckTexture      = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Color.png");
     metalNormalTexture= Core::loadTexture("textures/metal/Metal053C_1K-PNG_NormalGL.png");
     rockTexture       = Core::loadTexture("models/rock/sasso14.jpg");
     rockNormalTexture = Core::loadTexture("models/rock/normal.jpg");
     boxTexture        = Core::loadTexture("models/box/default_albedo.jpg");
     boxNormalTexture  = Core::loadTexture("models/box/default_normal.png");
+    dolphinTexture    = Core::loadTexture("models/dolphin/10014_dolphin_v1_Diffuse.jpg");
+    fishTexture       = Core::loadTexture("models/fish/fish.jpg");
+    diverBodyTexture  = Core::loadTexture("models/diver/Diver_Body_Color.png");
+    coralTexture      = Core::loadTexture("models/coral/SfM04_001cc.jpg");
 }
 
 void shutdown(GLFWwindow* window)
