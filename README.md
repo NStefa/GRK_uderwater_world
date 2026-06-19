@@ -27,3 +27,10 @@ Projekt na przedmiot Grafika Komputerowa.
    - opcja B: skopiuj bezpośrednio z projektów ćwiczeniowych
 3. Otwórz `underwater_world\underwater_world.sln` w Visual Studio 2022+
 4. Skompiluj i uruchom
+
+## Działanie projektu
+
+Obsługa dodatkowych klawiszy:
+- `F` - otwieranie / zamykanie skrzyni
+- `1`-`2` - sterowanie flowSpeed
+- `3`-`4` - sterowanie flowScale
