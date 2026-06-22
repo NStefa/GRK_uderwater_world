@@ -4,7 +4,6 @@ Release/
 x64/
 x86/
 *.exe
-*.obj
 *.pdb
 *.idb
 *.ilk
