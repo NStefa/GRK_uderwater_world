@@ -4,7 +4,6 @@ Projekt na przedmiot Grafika Komputerowa.
 ## Autorzy
 
 - Natalia Stefańska
-- Michał Sterczyński
 - Mateusz Zaręba
 
 ## Metody obowiązkowe
@@ -31,6 +30,5 @@ Projekt na przedmiot Grafika Komputerowa.
 ## Działanie projektu
 
 Obsługa dodatkowych klawiszy:
-- `F` - otwieranie / zamykanie skrzyni
 - `1`-`2` - sterowanie flowSpeed
 - `3`-`4` - sterowanie flowScale
