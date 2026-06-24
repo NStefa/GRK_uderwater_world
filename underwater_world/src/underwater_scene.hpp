@@ -33,11 +33,11 @@ GLuint sandTexture; // albedo piasku
 GLuint sandNormalTexture; // normalmapa piasku (odchylana przez flowmape w shaderze)
 
 // Wrak
-std::vector<Core::RenderContext> wreckMeshes; 
+std::vector<Core::RenderContext> wreckMeshes;
 GLuint wreckTexture; // albedo zardzewialego metalu
 GLuint metalNormalTexture; // normalmapa powierzchni metalowej
-GLuint metalMetallicTexture;  
-GLuint metalRoughnessTexture; 
+GLuint metalMetallicTexture;
+GLuint metalRoughnessTexture;
 
 // Skala
 Core::RenderContext rockContext;
@@ -57,16 +57,18 @@ GLuint dolphinTexture;
 std::vector<Core::RenderContext> fishContexts;
 std::vector<GLuint> fishTextures;
 
-// Nurek
-std::vector<Core::RenderContext> diverMeshes;
-GLuint diverBodyTexture;
 
 // Koral
 Core::RenderContext coralContext;
 GLuint coralTexture;
-GLuint rockyTexture;         // Rock058 albedo
-GLuint rockyNormalTexture;   // Rock058 normalmapa
-GLuint rockyRoughnessTexture;// Rock058 szorstkosci
+GLuint rockyTexture;          // Rock058 albedo
+GLuint rockyNormalTexture;    // Rock058 normalmapa
+GLuint rockyMetallicTexture;  // Rock058 metalicznosc (czarna = dielektryk)
+GLuint rockyRoughnessTexture; // Rock058 szorstkosci
+
+// Wodorosty
+std::vector<Core::RenderContext> seaweedMeshes;
+GLuint seaweedTexture;
 
 Core::Shader_Loader shaderLoader;
 
@@ -401,18 +403,36 @@ void renderScene(GLFWwindow* window)
         drawTex(*f.ctx, m, f.tex);
     }
 
-    // koral 1 - przy kufrze (odwrocony model, stad obrot X 180 i y=4)
+    // koral 1 - odwrocony jako skala
     glm::mat4 coralModel = glm::translate(glm::mat4(1.0f), glm::vec3(8.f, 4.f, -16.f));
     coralModel = glm::rotate(coralModel, glm::radians(180.f), glm::vec3(1.f, 0.f, 0.f));
     coralModel = glm::rotate(coralModel, glm::radians(45.f),  glm::vec3(0.f, 1.f, 0.f));
     coralModel = glm::scale(coralModel, glm::vec3(0.7f));
-    drawPBR(coralContext, coralModel, rockyTexture, rockyNormalTexture, metalMetallicTexture, rockyRoughnessTexture);
+    drawPBR(coralContext, coralModel, rockyTexture, rockyNormalTexture, rockyMetallicTexture, rockyRoughnessTexture);
 
     // koral 2 - za wrakiem, poprawnie zorientowany (rosnie z dna)
-    //glm::mat4 coralModel2 = glm::translate(glm::mat4(1.0f), glm::vec3(-4.f, -1.f, -24.f));
-    //coralModel2 = glm::rotate(coralModel2, glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f));
-    //coralModel2 = glm::scale(coralModel2, glm::vec3(0.6f));
-    //drawTex(coralContext, coralModel2, coralTexture);
+    glm::mat4 coralModel2 = glm::translate(glm::mat4(1.0f), glm::vec3(-20.f, -5.f, -24.f));
+    coralModel2 = glm::rotate(coralModel2, glm::radians(-20.f), glm::vec3(0.f, 1.f, 0.f));
+    coralModel2 = glm::scale(coralModel2, glm::vec3(0.6f));
+    drawPBR(coralContext, coralModel2, rockyTexture, rockyNormalTexture, rockyMetallicTexture, rockyRoughnessTexture);
+
+    // wodorosty przy skrzyni
+    {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        auto drawSeaweed = [&](glm::vec3 pos, float rotY, float scale = 1.f) {
+            glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
+            m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
+            m = glm::scale(m, glm::vec3(scale));
+            for (auto& mesh : seaweedMeshes)
+                drawTex(mesh, m, seaweedTexture);
+        };
+        drawSeaweed(glm::vec3(18.f, -1.f, -12.5f), 30.f, 0.5f);
+        drawSeaweed(glm::vec3(16.f, -1.f, -15.5f), 210.f, 0.5f);
+
+        glDisable(GL_BLEND);
+    }
 
     drawSkybox();
 
@@ -479,10 +499,10 @@ void init(GLFWwindow* window)
     // dno: pozycja(3) + normalna(3) + uv(2) + tangent(3) + bitangent(3) = stride 14
     float planeVertices[] = {
         // pozycja              // normalna      // uv          // tangent     // bitangent
-        -50.f,-1.f,-50.f,   0.f,1.f,0.f,   0.f,  0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
-         50.f,-1.f,-50.f,   0.f,1.f,0.f,   20.f, 0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
-         50.f,-1.f, 50.f,   0.f,1.f,0.f,   20.f, 20.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
-        -50.f,-1.f, 50.f,   0.f,1.f,0.f,   0.f,  20.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
+        -25.f,-1.f,-25.f,   0.f,1.f,0.f,   0.f,  0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
+         25.f,-1.f,-25.f,   0.f,1.f,0.f,   10.f, 0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
+         25.f,-1.f, 25.f,   0.f,1.f,0.f,   10.f, 10.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
+        -25.f,-1.f, 25.f,   0.f,1.f,0.f,   0.f,  10.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
     };
     unsigned int planeIndices[] = { 0,1,2,  0,2,3 };
 
@@ -511,7 +531,7 @@ void init(GLFWwindow* window)
     loadMesh("models/fish/12265_Fish_v1_L2.obj",                       fishContexts[0]);
     loadMesh("models/fish2/fish.obj",                                  fishContexts[1]);
     loadMesh("models/fish3/13007_Blue-Green_Reef_Chromis_v2_l3.obj",   fishContexts[2]);
-    loadAllMeshes("models/diver/Scuba Diver.obj", diverMeshes);
+
     loadMesh("models/coral/SfM04_001b.obj", coralContext);
 
     // tekstury
@@ -531,11 +551,15 @@ void init(GLFWwindow* window)
     fishTextures[0] = Core::loadTexture("models/fish/fish.jpg");
     fishTextures[1] = Core::loadTexture("models/fish2/fish.png");
     fishTextures[2] = Core::loadTexture("models/fish3/13004_Bicolor_Blenny_v1_diff.jpg");
-    diverBodyTexture  = Core::loadTexture("models/diver/Diver_Body_Color.png");
+
     coralTexture      = Core::loadTexture("models/coral/SfM04_001cc.jpg");
     rockyTexture          = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Color.png");
     rockyNormalTexture    = Core::loadTexture("textures/rocky/Rock058_1K-PNG_NormalGL.png");
+    rockyMetallicTexture  = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Metalness.png");
     rockyRoughnessTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Roughness.png");
+
+    loadAllMeshes("models/seaweed/seaweedList.obj", seaweedMeshes);
+    seaweedTexture = Core::loadTexture("models/seaweed/seaweed_diffuse.png");
 }
 
 void shutdown(GLFWwindow* window)
