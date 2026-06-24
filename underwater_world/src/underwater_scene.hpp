@@ -16,81 +16,85 @@
 #include <assimp/postprocess.h>
 #include <string>
 
-// --- Shadery ---
-GLuint program;           // kolor jednolity (shader_5_1)
-GLuint skyboxProgram;     // cubemapa skyboxu
-GLuint texProgram;        // tekstura bez normalmapy
-GLuint flowmapProgram;    // dno: kolor statyczny + normalna flow-distorted
-GLuint normalFlowProgram; // obiekty 3D: kolor statyczny + normalna flow-distorted
+GLuint skyboxProgram; // cubemapa jako tlo sceny
+GLuint texProgram; // shader textury (delfin, ryby, nurek, koral) - brak PBR
+GLuint flowmapProgram; // shader tekstury piasku z flowmapa (odchyla normalna w zaleznosci od pradu)
+GLuint normalFlowProgram; // shader tekstury z normalna odchylana przez flowmape
+GLuint pbrProgram; // shader PBR (wrak, skaly, kufer) - albedo + normal + metalic + roughness
 
-// --- Skybox ---
-GLuint skyboxVAO, skyboxVBO;
-GLuint skyboxTexture;
+// Skybox
+GLuint skyboxVAO, skyboxVBO; 
+GLuint skyboxTexture; // cubemapa 6 scian: px/nx/py/ny/pz/nz
 
-// --- Dno (plaszczyzna) ---
-GLuint planeVAO, planeVBO, planeEBO;
-GLuint flowmapTexture;
-GLuint sandTexture;
-GLuint sandNormalTexture;
+// Dno
+GLuint planeVAO, planeVBO, planeEBO; // pos+normal+uv+tangent+bitangent
+GLuint flowmapTexture; // mapa wektorow RGB -> kierunek i sila pradu
+GLuint sandTexture; // albedo piasku
+GLuint sandNormalTexture; // normalmapa piasku (odchylana przez flowmape w shaderze)
 
-// --- Wrak (statek) ---
-std::vector<Core::RenderContext> wreckMeshes;
-GLuint wreckTexture;
-GLuint metalNormalTexture;
+// Wrak
+std::vector<Core::RenderContext> wreckMeshes; 
+GLuint wreckTexture; // albedo zardzewialego metalu
+GLuint metalNormalTexture; // normalmapa powierzchni metalowej
+GLuint metalMetallicTexture;  
+GLuint metalRoughnessTexture; 
 
-// --- Skaly ---
+// Skala
 Core::RenderContext rockContext;
 GLuint rockTexture;
 GLuint rockNormalTexture;
 
-// --- Kufer ---
+// Kufer (siatka nr 14 to wieczko z osobna macierza obrotu)
 std::vector<Core::RenderContext> boxMeshes;
 GLuint boxTexture;
 GLuint boxNormalTexture;
 
-// --- Delfin ---
+// Delfin
 Core::RenderContext dolphinContext;
 GLuint dolphinTexture;
 
+// Ryby: 3 gatunki w wektorze (indeks odpowiada innemu gatunkowi)
+std::vector<Core::RenderContext> fishContexts;
+std::vector<GLuint> fishTextures;
 
-// --- Ryba ---
-Core::RenderContext fishContext;
-GLuint fishTexture;
-
-// --- Nurek ---
+// Nurek
 std::vector<Core::RenderContext> diverMeshes;
 GLuint diverBodyTexture;
 
-// --- Koral ---
+// Koral
 Core::RenderContext coralContext;
 GLuint coralTexture;
+GLuint rockyTexture;         // Rock058 albedo
+GLuint rockyNormalTexture;   // Rock058 normalmapa
+GLuint rockyRoughnessTexture;// Rock058 szorstkosci
 
 Core::Shader_Loader shaderLoader;
 
-// --- Kamera ---
+// Kamera kwaternionowa
 glm::vec3 cameraPos = glm::vec3(-4.f, 0, 0);
 glm::quat cameraOrientation = glm::quat(1.f, 0.f, 0.f, 0.f);
 float cameraYaw = 0.f;
 float cameraPitch = 0.f;
 
-// --- Oswietlenie ---
-glm::vec3 lightColor = glm::vec3(1.f, 1.f, 1.f);
-glm::vec3 lightDir = glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f));
+// Oswietlenie
+glm::vec3 lightColor = glm::vec3(0.7f, 0.7f, 0.7f);
+glm::vec3 lightDir = glm::normalize(glm::vec3(0.2f, 1.0f, 0.2f));
+glm::vec3 lightPos = glm::vec3(2.f, 20.f, 2.f);
 
-// --- Czas ---
+// Czas
 float aspectRatio = 1.f;
 float lastTime = -1.f;
 float deltaTime = 0.f;
 
-// --- Parametry flowmapy ---
+// Parametry do flowmapy
 const float FLOW_SPEED_DEFAULT = 0.05f;
 float flowSpeed = FLOW_SPEED_DEFAULT;
 float flowScale = 0.2f;
 
-// --- Animacja wieczka kufra ---
-float boxLidAngle  = 0.0f;   // aktualny kat otwarcia (0 = zamkniety, 110 = otwarty)
-bool  boxLidOpen   = false;   // cel: otwarty/zamkniety
-// pivot zawiasow w przestrzeni modelu (przed skalowaniem 0.02)
+// Otwieranie/zamykanie wieczka kufra 
+float boxLidAngle = 0.0f;   //kat otwarcia (0 = zamkniety, 110 = otwarty)
+bool boxLidOpen = false;   // otwarty/zamkniety
+
 const glm::vec3 BOX_LID_PIVOT = glm::vec3(-19.9f, 22.7f, 0.0f);
 
 float skyboxVertices[] = {
@@ -108,6 +112,7 @@ float skyboxVertices[] = {
      1.0f, -1.0f, -1.0f,   -1.0f, -1.0f,  1.0f,    1.0f, -1.0f,  1.0f
 };
 
+// Funkcja: ruch kamery w zaleznosci od czasu (deltaTime) i klawiszy WSAD
 void updateDeltaTime(float time) {
     if (lastTime < 0) { lastTime = time; return; }
     deltaTime = time - lastTime;
@@ -115,8 +120,9 @@ void updateDeltaTime(float time) {
     lastTime = time;
 }
 
-bool resetMouseAnchor = true;
+bool resetMouseAnchor = true; // zmiana trybu myszy 
 
+// Funkcja: obracanie kamery w zaleznosci od ruchu myszy
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
     static double lastX = xpos;
@@ -140,11 +146,12 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     const float pitchLimit = glm::radians(89.f);
     cameraPitch = glm::clamp(cameraPitch, -pitchLimit, pitchLimit);
 
-    glm::quat yawQuat   = glm::angleAxis(cameraYaw,   glm::vec3(0.f, 1.f, 0.f));
+    glm::quat yawQuat = glm::angleAxis(cameraYaw,   glm::vec3(0.f, 1.f, 0.f));
     glm::quat pitchQuat = glm::angleAxis(cameraPitch, glm::vec3(1.f, 0.f, 0.f));
     cameraOrientation = yawQuat * pitchQuat;
 }
 
+// Funkcja: macierz widoku kamery na podstawie pozycji i orientacji kwaternionowej
 glm::mat4 createCameraMatrix()
 {
     glm::vec3 forward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
@@ -152,6 +159,7 @@ glm::mat4 createCameraMatrix()
     return Core::createViewMatrix(cameraPos, forward, up);
 }
 
+// Funckcja: macierz projekcji perspektywicznej
 glm::mat4 createPerspectiveMatrix()
 {
     float n = 0.05f;
@@ -165,19 +173,22 @@ glm::mat4 createPerspectiveMatrix()
     return glm::transpose(perspectiveMatrix);
 }
 
-// Rysuje plaszczyzne dna: kolor statyczny, normalna flow-distorted
-void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, GLuint normalTex, float flowMapScale = 0.05f) {
+// Funkcja: rysuje plaszczyzne dna (kolor statyczny, normalna flow-distorted)
+void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, 
+                 GLuint normalTex, float flowMapScale = 0.05f) {
     if (!context.vertexArray) return;
+
     glUseProgram(flowmapProgram);
-    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
+	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
     glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
-    glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
-    glUniform3f(glGetUniformLocation(flowmapProgram, "lightDir"),    lightDir.x,   lightDir.y,   lightDir.z);
-    glUniform3f(glGetUniformLocation(flowmapProgram, "lightColor"),  lightColor.x, lightColor.y, lightColor.z);
-    glUniform3f(glGetUniformLocation(flowmapProgram, "cameraPos"),   cameraPos.x,  cameraPos.y,  cameraPos.z);
-    glUniform1f(glGetUniformLocation(flowmapProgram, "time"),        (float)glfwGetTime());
-    glUniform1f(glGetUniformLocation(flowmapProgram, "speed"),       flowSpeed);
-    glUniform1f(glGetUniformLocation(flowmapProgram, "flowScale"),   flowScale);
+    glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "modelMatrix"), 1, GL_FALSE, (float*)&modelMatrix);
+
+    glUniform3f(glGetUniformLocation(flowmapProgram, "lightDir"), lightDir.x, lightDir.y, lightDir.z);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform1f(glGetUniformLocation(flowmapProgram, "time"), (float)glfwGetTime());
+    glUniform1f(glGetUniformLocation(flowmapProgram, "speed"), flowSpeed);
+    glUniform1f(glGetUniformLocation(flowmapProgram, "flowScale"), flowScale);
     glUniform1f(glGetUniformLocation(flowmapProgram, "flowMapScale"), flowMapScale);
 
     glActiveTexture(GL_TEXTURE0);
@@ -196,19 +207,23 @@ void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flo
     glUseProgram(0);
 }
 
-// Rysuje obiekt 3D: kolor statyczny, normalna flow-distorted (skaly, wrak, kufer)
-void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, GLuint normalTex, float flowMapScale = 1.0f) {
+// Funkcja: rysuje obiekt 3D (kolor statyczny, normalna flow-distorted dla skaly, wraku, kufera)
+void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, 
+                    GLuint normalTex, float flowMapScale = 1.0f) {
     if (!context.vertexArray) return;
+
     glUseProgram(normalFlowProgram);
-    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
+	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
+
     glUniformMatrix4fv(glGetUniformLocation(normalFlowProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
     glUniformMatrix4fv(glGetUniformLocation(normalFlowProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
-    glUniform3f(glGetUniformLocation(normalFlowProgram, "lightDir"),    lightDir.x,   lightDir.y,   lightDir.z);
-    glUniform3f(glGetUniformLocation(normalFlowProgram, "lightColor"),  lightColor.x, lightColor.y, lightColor.z);
-    glUniform3f(glGetUniformLocation(normalFlowProgram, "cameraPos"),   cameraPos.x,  cameraPos.y,  cameraPos.z);
-    glUniform1f(glGetUniformLocation(normalFlowProgram, "time"),        (float)glfwGetTime());
-    glUniform1f(glGetUniformLocation(normalFlowProgram, "speed"),       flowSpeed);
-    glUniform1f(glGetUniformLocation(normalFlowProgram, "flowScale"),   flowScale);
+
+    glUniform3f(glGetUniformLocation(normalFlowProgram, "lightDir"), lightDir.x, lightDir.y, lightDir.z);
+    glUniform3f(glGetUniformLocation(normalFlowProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+    glUniform3f(glGetUniformLocation(normalFlowProgram, "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform1f(glGetUniformLocation(normalFlowProgram, "time"), (float)glfwGetTime());
+    glUniform1f(glGetUniformLocation(normalFlowProgram, "speed"), flowSpeed);
+    glUniform1f(glGetUniformLocation(normalFlowProgram, "flowScale"), flowScale);
     glUniform1f(glGetUniformLocation(normalFlowProgram, "flowMapScale"), flowMapScale);
 
     glActiveTexture(GL_TEXTURE0);
@@ -227,13 +242,45 @@ void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint 
     glUseProgram(0);
 }
 
+// Funkcja: rysuje obiekt 3D z PBR (albedo + normal + metallic + roughness)
+void drawPBR(Core::RenderContext& context, glm::mat4 modelMatrix,
+             GLuint albedo, GLuint normal, GLuint metallic, GLuint roughness) {
+    if (!context.vertexArray) return;
+
+    glUseProgram(pbrProgram);
+
+	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
+    glUniformMatrix4fv(glGetUniformLocation(pbrProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
+    glUniformMatrix4fv(glGetUniformLocation(pbrProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
+
+    glUniform3f(glGetUniformLocation(pbrProgram, "lightPos"), lightPos.x, lightPos.y, lightPos.z);
+    glUniform3f(glGetUniformLocation(pbrProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+    glUniform3f(glGetUniformLocation(pbrProgram, "camPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, albedo);
+    glUniform1i(glGetUniformLocation(pbrProgram, "albedoMap"), 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, normal);
+    glUniform1i(glGetUniformLocation(pbrProgram, "normalMap"), 1);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, metallic);
+    glUniform1i(glGetUniformLocation(pbrProgram, "metallicMap"), 2);
+    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, roughness);
+    glUniform1i(glGetUniformLocation(pbrProgram, "roughnessMap"), 3);
+
+    Core::DrawContext(context);
+    glUseProgram(0);
+}
+
+// Funkcja: rysuje obiekt 3D z tekstura (albedo)
 void drawTex(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint colorTex) {
     if (!context.vertexArray) return;
+
     glUseProgram(texProgram);
-    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
+
+	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
     glUniformMatrix4fv(glGetUniformLocation(texProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
     glUniformMatrix4fv(glGetUniformLocation(texProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
-    glUniform3f(glGetUniformLocation(texProgram, "lightDir"),   lightDir.x,   lightDir.y,   lightDir.z);
+
+    glUniform3f(glGetUniformLocation(texProgram, "lightDir"), lightDir.x, lightDir.y, lightDir.z);
     glUniform3f(glGetUniformLocation(texProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, colorTex);
@@ -242,16 +289,20 @@ void drawTex(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint colorTe
     glUseProgram(0);
 }
 
+// Funkcja: rysuje skybox (cubemap) jako tlo sceny
 void drawSkybox()
 {
     glDepthFunc(GL_LEQUAL);
     glUseProgram(skyboxProgram);
-    glm::mat4 view       = glm::mat4(glm::mat3(createCameraMatrix()));
+
+    glm::mat4 view = glm::mat4(glm::mat3(createCameraMatrix()));
     glm::mat4 projection = createPerspectiveMatrix();
-    glUniformMatrix4fv(glGetUniformLocation(skyboxProgram, "view"),       1, GL_FALSE, (float*)&view);
+
+    glUniformMatrix4fv(glGetUniformLocation(skyboxProgram, "view"), 1, GL_FALSE, (float*)&view);
     glUniformMatrix4fv(glGetUniformLocation(skyboxProgram, "projection"), 1, GL_FALSE, (float*)&projection);
     glBindVertexArray(skyboxVAO);
     glActiveTexture(GL_TEXTURE0);
+
     glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture);
     glUniform1i(glGetUniformLocation(skyboxProgram, "skybox"), 0);
     glDrawArrays(GL_TRIANGLES, 0, 36);
@@ -260,6 +311,7 @@ void drawSkybox()
     glUseProgram(0);
 }
 
+// Funkcja: rysuje cala scene 3D (dno, wrak, kufer, skaly, delfiny, ryby, nurek, koral, skybox)
 void renderScene(GLFWwindow* window)
 {
     glClearColor(0.0f, 0.15f, 0.25f, 1.0f);
@@ -272,61 +324,95 @@ void renderScene(GLFWwindow* window)
     planeCtx.size = 6;
     drawFlowmap(planeCtx, glm::mat4(1.0f), flowmapTexture, sandTexture, sandNormalTexture);
 
-    // kufer (wszystkie 15 czesci: dno, wieczko, zawiasy, zamek...)
-    glm::mat4 boxBase = glm::translate(glm::mat4(1.0f), glm::vec3(-1.f, -1.f, -5.f));
-    boxBase = glm::scale(boxBase, glm::vec3(0.02f));
+    // wrak
+    glm::mat4 wreckModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -1.f, -18.f));
+    wreckModel = glm::rotate(wreckModel, glm::radians(21.f), glm::vec3(0.f, 1.f, 0.f));
+    wreckModel = glm::scale(wreckModel, glm::vec3(0.019f));
+    for (auto& mesh : wreckMeshes)
+        drawPBR(mesh, wreckModel, wreckTexture, metalNormalTexture, metalMetallicTexture, metalRoughnessTexture);
 
-    // wieczko (mesh 14 = Top1): obrot wokol zawiasow
+    // kufer (otwiera sie przy zblizeniu) - przy rafie koralu
+    const glm::vec3 boxWorldPos = glm::vec3(17.f, -1.f, -14.f);
+    glm::mat4 boxBase = glm::translate(glm::mat4(1.0f), boxWorldPos);
+    boxBase = glm::rotate(boxBase, glm::radians(210.f), glm::vec3(0.f, 1.f, 0.f));
+    boxBase = glm::scale(boxBase, glm::vec3(0.02f));
     glm::mat4 lidRot = glm::translate(glm::mat4(1.0f),  BOX_LID_PIVOT)
                      * glm::rotate(glm::mat4(1.0f), glm::radians(boxLidAngle), glm::vec3(0.0f, 0.0f, 1.0f))
                      * glm::translate(glm::mat4(1.0f), -BOX_LID_PIVOT);
-
     for (int i = 0; i < (int)boxMeshes.size(); i++) {
         glm::mat4 meshModel = (i == 14) ? boxBase * lidRot : boxBase;
         drawNormalFlow(boxMeshes[i], meshModel, flowmapTexture, boxTexture, boxNormalTexture);
     }
 
     // skaly
-    glm::mat4 rockModel = glm::translate(glm::mat4(1.0f), glm::vec3(3.f, -0.75f, -5.f));
-    drawNormalFlow(rockContext, rockModel, flowmapTexture, rockTexture, rockNormalTexture);
+    auto drawRock = [&](glm::vec3 pos, float rotY, float scale = 1.f) {
+        glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
+        m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
+        m = glm::scale(m, glm::vec3(scale));
+        drawNormalFlow(rockContext, m, flowmapTexture, rockTexture, rockNormalTexture);
+    };
+    // skaly przy wraku
+    drawRock(glm::vec3( 4.f, -1.f, -12.f),   0.f, 1.2f);
+    drawRock(glm::vec3(-3.f, -1.f, -14.f),  45.f, 0.9f);
+    drawRock(glm::vec3( 6.f, -1.f, -20.f),  90.f, 1.5f);
+    drawRock(glm::vec3(-5.f, -1.f, -22.f), 130.f, 1.1f);
+    drawRock(glm::vec3( 2.f, -1.f, -25.f), 200.f, 0.8f);
 
-    glm::mat4 rockModel2 = glm::translate(glm::mat4(1.0f), glm::vec3(-2.f, -0.65f, -7.f));
-    rockModel2 = glm::rotate(rockModel2, glm::radians(45.f), glm::vec3(0.f, 1.f, 0.f));
-    drawNormalFlow(rockContext, rockModel2, flowmapTexture, rockTexture, rockNormalTexture);
+    // skaly po lewej
+    drawRock(glm::vec3(-10.f,  -1.f, -10.f), 60.f, 5.0f);
+    drawRock(glm::vec3(-20.f, -1.f, -10.f), 110.f, 5.0f);
+    drawRock(glm::vec3(-17.f,  -1.f, -10.f),  40.f, 5.0f);
+    drawRock(glm::vec3(-18.f, -1.f, -15.f), 170.f, 2.0f);
+    drawRock(glm::vec3(-17.f, -1.f, -12.f), 310.f, 3.0f);
+    drawRock(glm::vec3(-18.f, -1.f, -15.f),  55.f, 1.0f);
 
-    glm::mat4 rockModel3 = glm::translate(glm::mat4(1.0f), glm::vec3(5.f, -0.85f, -10.f));
-    drawNormalFlow(rockContext, rockModel3, flowmapTexture, rockTexture, rockNormalTexture);
+    // delfiny
+    auto makeDolphin = [&](glm::vec3 pos, float rotY = 0.f) {
+        glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
+        m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
+        m = glm::scale(m, glm::vec3(0.012f));
+        drawTex(dolphinContext, m, dolphinTexture);
+    };
+    makeDolphin(glm::vec3(-4.f, 2.5f, -10.f),  30.f);
+    makeDolphin(glm::vec3( 5.f, 3.0f, -14.f), 200.f);
+    makeDolphin(glm::vec3(-2.f, 2.0f, -20.f), 150.f);
 
-    glm::mat4 rockModel4 = glm::translate(glm::mat4(1.0f), glm::vec3(-4.f, -0.69f, -12.f));
-    drawNormalFlow(rockContext, rockModel4, flowmapTexture, rockTexture, rockNormalTexture);
+    // ryby
+    struct FishPlacement { Core::RenderContext* ctx; GLuint tex; glm::vec3 pos; float rotY; float scale; };
+    FishPlacement fish[] = {
+        // fish[0] - mala tropikalna
+        { &fishContexts[0], fishTextures[0], {-7.f, -0.6f, -13.f},   0.f, 0.05f },
+        { &fishContexts[0], fishTextures[0], {-9.f, -0.4f, -16.f},  60.f, 0.05f },
+        { &fishContexts[0], fishTextures[0], {-6.f,  0.2f, -17.f}, 120.f, 0.05f },
+        // fish[1] - sredni
+        { &fishContexts[1], fishTextures[1], { 3.f, -0.5f,  -8.f},  90.f, 0.05f  },
+        { &fishContexts[1], fishTextures[1], {-1.f,  0.3f, -10.f}, 210.f, 0.06f  },
+        { &fishContexts[1], fishTextures[1], { 5.f, -0.3f, -15.f}, 300.f, 0.05f  },
+        { &fishContexts[1], fishTextures[1], { 1.f,  0.5f, -12.f},  45.f, 0.06f  },
+        // fish[2] - mala
+        { &fishContexts[2], fishTextures[2], {-3.f, -0.5f, -11.f}, 180.f, 0.05f },
+        { &fishContexts[2], fishTextures[2], { 4.f,  0.1f, -13.f}, 270.f, 0.05f },
+        { &fishContexts[2], fishTextures[2], {-5.f,  0.4f, -19.f},  90.f, 0.05f },
+    };
+    for (auto& f : fish) {
+        glm::mat4 m = glm::translate(glm::mat4(1.f), f.pos);
+        m = glm::rotate(m, glm::radians(f.rotY), glm::vec3(0.f, 1.f, 0.f));
+        m = glm::scale(m, glm::vec3(f.scale));
+        drawTex(*f.ctx, m, f.tex);
+    }
 
-    // delfin
-    glm::mat4 dolphinModel = glm::translate(glm::mat4(1.0f), glm::vec3(2.f, 0.f, -6.f));
-    dolphinModel = glm::scale(dolphinModel, glm::vec3(0.01f));
-    drawTex(dolphinContext, dolphinModel, dolphinTexture);
+    // koral 1 - przy kufrze (odwrocony model, stad obrot X 180 i y=4)
+    glm::mat4 coralModel = glm::translate(glm::mat4(1.0f), glm::vec3(8.f, 4.f, -16.f));
+    coralModel = glm::rotate(coralModel, glm::radians(180.f), glm::vec3(1.f, 0.f, 0.f));
+    coralModel = glm::rotate(coralModel, glm::radians(45.f),  glm::vec3(0.f, 1.f, 0.f));
+    coralModel = glm::scale(coralModel, glm::vec3(0.7f));
+    drawPBR(coralContext, coralModel, rockyTexture, rockyNormalTexture, metalMetallicTexture, rockyRoughnessTexture);
 
-    // ryba
-    glm::mat4 fishModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -0.5f, -4.f));
-    fishModel = glm::scale(fishModel, glm::vec3(0.01f));
-    drawTex(fishContext, fishModel, fishTexture);
-
-
-    // nurek (wszystkie czesci jedna tekstura body)
-    glm::mat4 diverModel = glm::translate(glm::mat4(1.0f), glm::vec3(-3.f, -0.5f, -6.f));
-    diverModel = glm::scale(diverModel, glm::vec3(0.5f));
-    for (auto& mesh : diverMeshes)
-        drawTex(mesh, diverModel, diverBodyTexture);
-
-    // koral (tymczasowo wylaczony)
-    // glm::mat4 coralModel = glm::translate(glm::mat4(1.0f), glm::vec3(1.f, -1.f, -8.f));
-    // coralModel = glm::scale(coralModel, glm::vec3(0.5f));
-    // drawTex(coralContext, coralModel, coralTexture);
-
-    // wrak
-    glm::mat4 wreckModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -1.f, -10.f));
-    wreckModel = glm::scale(wreckModel, glm::vec3(0.01f));
-    for (auto& mesh : wreckMeshes)
-        drawNormalFlow(mesh, wreckModel, flowmapTexture, wreckTexture, metalNormalTexture);
+    // koral 2 - za wrakiem, poprawnie zorientowany (rosnie z dna)
+    //glm::mat4 coralModel2 = glm::translate(glm::mat4(1.0f), glm::vec3(-4.f, -1.f, -24.f));
+    //coralModel2 = glm::rotate(coralModel2, glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f));
+    //coralModel2 = glm::scale(coralModel2, glm::vec3(0.6f));
+    //drawTex(coralContext, coralModel2, coralTexture);
 
     drawSkybox();
 
@@ -368,11 +454,11 @@ void init(GLFWwindow* window)
     glEnable(GL_DEPTH_TEST);
 
     // shadery
-    program           = shaderLoader.CreateProgram("shaders/shader_5_1.vert",            "shaders/shader_5_1.frag");
     skyboxProgram     = shaderLoader.CreateProgram("shaders/shader_skybox.vert",          "shaders/shader_skybox.frag");
     texProgram        = shaderLoader.CreateProgram("shaders/shader_tex.vert",             "shaders/shader_tex.frag");
     flowmapProgram    = shaderLoader.CreateProgram("shaders/shader_flowmap.vert",         "shaders/shader_flowmap.frag");
     normalFlowProgram = shaderLoader.CreateProgram("shaders/shader_normalmap_flow.vert",  "shaders/shader_normalmap_flow.frag");
+    pbrProgram        = shaderLoader.CreateProgram("shaders/shader_pbr.vert",             "shaders/shader_pbr.frag");
 
     // skybox VAO
     glGenVertexArrays(1, &skyboxVAO);
@@ -421,33 +507,44 @@ void init(GLFWwindow* window)
     loadMesh("models/rock/sasso14.obj",           rockContext);
     loadAllMeshes("models/box/chest_low.obj",      boxMeshes);
     loadMesh("models/dolphin/10014_dolphin_v2_max2011_it2.obj", dolphinContext);
-    loadMesh("models/fish/12265_Fish_v1_L2.obj", fishContext);
+    fishContexts.resize(3);
+    loadMesh("models/fish/12265_Fish_v1_L2.obj",                       fishContexts[0]);
+    loadMesh("models/fish2/fish.obj",                                  fishContexts[1]);
+    loadMesh("models/fish3/13007_Blue-Green_Reef_Chromis_v2_l3.obj",   fishContexts[2]);
     loadAllMeshes("models/diver/Scuba Diver.obj", diverMeshes);
     loadMesh("models/coral/SfM04_001b.obj", coralContext);
 
     // tekstury
     flowmapTexture    = Core::loadTexture("textures/flowmap.png");
-    sandTexture       = Core::loadTexture("textures/sand/Ground080_4K-PNG_Color.png");
-    sandNormalTexture = Core::loadTexture("textures/sand/Ground080_4K-PNG_NormalGL.png");
-    wreckTexture      = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Color.png");
-    metalNormalTexture= Core::loadTexture("textures/metal/Metal053C_1K-PNG_NormalGL.png");
+    sandTexture       = Core::loadTexture("textures/sand/Ground080_1K-PNG_Color.png");
+    sandNormalTexture = Core::loadTexture("textures/sand/Ground080_1K-PNG_NormalGL.png");
+    wreckTexture          = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Color.png");
+    metalNormalTexture    = Core::loadTexture("textures/metal/Metal053C_1K-PNG_NormalGL.png");
+    metalMetallicTexture  = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Metalness.png");
+    metalRoughnessTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Roughness.png");
     rockTexture       = Core::loadTexture("models/rock/sasso14.jpg");
     rockNormalTexture = Core::loadTexture("models/rock/normal.jpg");
     boxTexture        = Core::loadTexture("models/box/default_albedo.jpg");
     boxNormalTexture  = Core::loadTexture("models/box/default_normal.png");
     dolphinTexture    = Core::loadTexture("models/dolphin/10014_dolphin_v1_Diffuse.jpg");
-    fishTexture       = Core::loadTexture("models/fish/fish.jpg");
+    fishTextures.resize(3);
+    fishTextures[0] = Core::loadTexture("models/fish/fish.jpg");
+    fishTextures[1] = Core::loadTexture("models/fish2/fish.png");
+    fishTextures[2] = Core::loadTexture("models/fish3/13004_Bicolor_Blenny_v1_diff.jpg");
     diverBodyTexture  = Core::loadTexture("models/diver/Diver_Body_Color.png");
     coralTexture      = Core::loadTexture("models/coral/SfM04_001cc.jpg");
+    rockyTexture          = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Color.png");
+    rockyNormalTexture    = Core::loadTexture("textures/rocky/Rock058_1K-PNG_NormalGL.png");
+    rockyRoughnessTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Roughness.png");
 }
 
 void shutdown(GLFWwindow* window)
 {
-    shaderLoader.DeleteProgram(program);
     shaderLoader.DeleteProgram(skyboxProgram);
     shaderLoader.DeleteProgram(texProgram);
     shaderLoader.DeleteProgram(flowmapProgram);
     shaderLoader.DeleteProgram(normalFlowProgram);
+    shaderLoader.DeleteProgram(pbrProgram);
 }
 
 void processInput(GLFWwindow* window)
@@ -483,11 +580,10 @@ void processInput(GLFWwindow* window)
     key1Was = key1; key2Was = key2; key3Was = key3; key4Was = key4; keyRWas = keyR;
 
 
-    // F: otworz/zamknij wieczko kufra
-    static bool keyFWas = false;
-    bool keyF = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
-    if (keyF && !keyFWas) boxLidOpen = !boxLidOpen;
-    keyFWas = keyF;
+    // skrzynia otwiera sie automatycznie przy zblizeniu kamery
+    const glm::vec3 boxWorldPos = glm::vec3(17.f, -1.f, -14.f);
+    float distToBox = glm::length(cameraPos - boxWorldPos);
+    boxLidOpen = (distToBox < 2.5f);
 
     if (key1 || key2 || key3 || key4 || keyR) {
         char title[128];

@@ -57,8 +57,8 @@ void main()
 
     // Phong lighting (ambient + diffuse)
     float diff = max(dot(normal, normalize(lightDir)), 0.0);
-    vec3 ambient = 0.3 * lightColor;
-    vec3 diffuse = diff * lightColor;
+    vec3 ambient = 0.2 * lightColor;
+    vec3 diffuse = diff * lightColor * 0.5;
     vec3 litColor = (ambient + diffuse) * texColor.rgb;
 
     // Exponential underwater fog: exp(-dist * density), 1=no fog, 0=full fog
