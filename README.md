@@ -116,7 +116,7 @@ Projekt na przedmiot Grafika Komputerowa.
 | W/A/S/D | Ruch kamery przód/lewo/tył/prawo |
 | Q/E | Ruch kamery dół/góra |
 | Mysz | Obrót kamery (yaw + pitch) |
-| Left Shift | Sprint — 3x szybszy ruch |
+| Left Shift | Sprint - 3x szybszy ruch |
 | L | Włącz/wyłącz latarkę nurka |
 | 1 / 2 | Zmniejsz / zwiększ prędkość prądu wodnego |
 | 3 / 4 | Zmniejsz / zwiększ skalę przesunięcia prądu |
