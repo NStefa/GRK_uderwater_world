@@ -6,23 +6,28 @@ layout(location = 2) in vec2 vertexTexCoord;
 layout(location = 3) in vec3 vertexTangent;
 layout(location = 4) in vec3 vertexBitangent;
 
-uniform mat4 transformation;
 uniform mat4 modelMatrix;
+uniform mat4 transformation;
 
-out vec2 texCoord;
-out vec3 worldNormal;
+uniform mat4 lightSpaceMatrix;
+
 out vec3 worldPos;
+out vec3 worldNormal;
+out vec2 texCoord;
 out vec3 worldTangent;
 out vec3 worldBitangent;
 
+out vec4 fragPosLightSpace;
+
 void main()
 {
-    vec4 worldPosition = modelMatrix * vec4(vertexPosition, 1.0);
-    gl_Position = transformation * vec4(vertexPosition, 1.0);
+    worldPos = (modelMatrix * vec4(vertexPosition, 1.0)).xyz;
+    worldNormal = (modelMatrix * vec4(vertexNormal, 0.0)).xyz;
+    worldTangent = (modelMatrix * vec4(vertexTangent, 0.0)).xyz;
+    worldBitangent = (modelMatrix * vec4(vertexBitangent, 0.0)).xyz;
+    texCoord = vertexTexCoord;
+    
+    fragPosLightSpace = lightSpaceMatrix * vec4(worldPos, 1.0);
 
-    texCoord       = vertexTexCoord;
-    worldNormal    = normalize((modelMatrix * vec4(vertexNormal,    0.0)).xyz);
-    worldTangent   = normalize((modelMatrix * vec4(vertexTangent,   0.0)).xyz);
-    worldBitangent = normalize((modelMatrix * vec4(vertexBitangent, 0.0)).xyz);
-    worldPos       = worldPosition.xyz;
+    gl_Position = transformation * vec4(vertexPosition, 1.0);
 }
