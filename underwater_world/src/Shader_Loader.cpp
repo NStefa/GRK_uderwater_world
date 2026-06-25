@@ -8,6 +8,7 @@ using namespace Core;
 Shader_Loader::Shader_Loader(void){}
 Shader_Loader::~Shader_Loader(void){}
 
+// wczytuje shader z pliku i zwraca jego kod jako string
 std::string Shader_Loader::ReadShader(char *filename)
 {
 
@@ -28,6 +29,7 @@ std::string Shader_Loader::ReadShader(char *filename)
 	return shaderCode;
 }
 
+// tworzy shader z podanego kodu i zwraca jego ID
 GLuint Shader_Loader::CreateShader(GLenum shaderType, std::string
 	source, char* shaderName)
 {
@@ -42,7 +44,7 @@ GLuint Shader_Loader::CreateShader(GLenum shaderType, std::string
 	glCompileShader(shader);
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &compile_result);
 
-	//sprawdz bledy
+	// sprawdzenie czy shader sie skompilowal
 	if (compile_result == GL_FALSE)
 	{
 
@@ -60,8 +62,7 @@ GLuint Shader_Loader::CreateShader(GLenum shaderType, std::string
 GLuint Shader_Loader::CreateProgram(char* vertexShaderFilename,
 	char* fragmentShaderFilename)
 {
-
-	//wczytaj shadery
+	// wczytanie shaderow
 	std::string vertex_shader_code = ReadShader(vertexShaderFilename);
 	std::string fragment_shader_code = ReadShader(fragmentShaderFilename);
 
@@ -69,14 +70,16 @@ GLuint Shader_Loader::CreateProgram(char* vertexShaderFilename,
 	GLuint fragment_shader = CreateShader(GL_FRAGMENT_SHADER, fragment_shader_code, "fragment shader");
 
 	int link_result = 0;
-	//stworz shader
+
+	// stworzenie shadera
 	GLuint program = glCreateProgram();
 	glAttachShader(program, vertex_shader);
 	glAttachShader(program, fragment_shader);
 
 	glLinkProgram(program);
 	glGetProgramiv(program, GL_LINK_STATUS, &link_result);
-	//sprawdz bledy w linkerze
+
+	// sprawdzenie czy linker sie powiodl
 	if (link_result == GL_FALSE)
 	{
 
@@ -96,6 +99,7 @@ GLuint Shader_Loader::CreateProgram(char* vertexShaderFilename,
 	return program;
 }
 
+// usuwa program shadera
 void Shader_Loader::DeleteProgram( GLuint program )
 {
 	glDeleteProgram(program);

@@ -21,6 +21,7 @@ uniform float speed;
 uniform float flowScale;
 uniform float flowMapScale;
 uniform vec2 flowDirection;
+uniform bool flowColor;
 
 uniform bool spotOn;
 uniform vec3 spotPos;
@@ -58,9 +59,8 @@ void main()
 {
     vec2 flowUV = texCoord * flowMapScale;
     vec2 flowRaw = texture(flowMap, flowUV).rg * 2.0 - 1.0;
-    vec2 fDir = flowRaw + flowDirection * 0.5;
+    vec2 fDir = flowRaw * 0.3 + flowDirection * 0.7;
 
-    // ZABEZPIECZENIE #1: Ochrona przed wektorem zerowym z flowmapy
     vec2 flow = length(fDir) > 0.001 ? normalize(fDir) : vec2(0.0);
 
     float phase0 = fract(time * speed);
@@ -71,15 +71,20 @@ void main()
 
     float blend = abs(phase0 * 2.0 - 1.0);
 
-    vec4 c0 = texture(colorTexture, uv0);
-    vec4 c1 = texture(colorTexture, uv1);
-    vec4 texColor = mix(c0, c1, blend);
+    vec4 texColor;
+    if (flowColor) {
+        vec4 c0 = texture(colorTexture, uv0);
+        vec4 c1 = texture(colorTexture, uv1);
+        texColor = mix(c0, c1, blend);
+    } else {
+        texColor = texture(colorTexture, texCoord);
+    }
 
     vec3 n0 = texture(normalMap, uv0).rgb * 2.0 - 1.0;
     vec3 n1 = texture(normalMap, uv1).rgb * 2.0 - 1.0;
     vec3 tangentNormal = normalize(mix(n0, n1, blend));
 
-    // ZABEZPIECZENIE #2: Ochrona przed uszkodzonymi zepsutymi wektorami siatki z Blendera/sieci
+    // sprawdzanie d�ugo�ci wektor�w i normalizacja, aby unikn�� problem�w z zerow� d�ugo�ci�
     vec3 T = length(worldTangent) > 0.001 ? normalize(worldTangent) : vec3(1.0, 0.0, 0.0);
     vec3 B = length(worldBitangent) > 0.001 ? normalize(worldBitangent) : vec3(0.0, 1.0, 0.0);
     vec3 N = length(worldNormal) > 0.001 ? normalize(worldNormal) : vec3(0.0, 0.0, 1.0);
@@ -94,7 +99,7 @@ void main()
     vec3 diffuse = diff * lightColor * (1.0 - shadow);
     vec3 litColor = (ambient + diffuse) * texColor.rgb;
 
-    // --- LATARKA ---
+    // latarka
     if (spotOn) {
         vec3 lightToFrag = normalize(spotPos - worldPos);
         float theta = dot(lightToFrag, normalize(-spotDir)); 

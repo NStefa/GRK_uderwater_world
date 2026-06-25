@@ -131,10 +131,10 @@ void Core::DrawContext(Core::RenderContext& context)
 
 	glBindVertexArray(context.vertexArray);
 	glDrawElements(
-		GL_TRIANGLES,      // mode
-		context.size,    // count
-		GL_UNSIGNED_INT,   // type
-		(void*)0           // element array buffer offset
+		GL_TRIANGLES, // mode
+		context.size, // count
+		GL_UNSIGNED_INT, // type
+		(void*)0 // element array buffer offset
 	);
 	glBindVertexArray(0);
 }

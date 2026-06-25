@@ -61,31 +61,31 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir)
 void main()
 {
     vec2 flowUV = texCoord * flowMapScale;
-    // Remap [0,1] -> [-1,1]: 0.5 = no flow, 0.0 = max left, 1.0 = max right
-    vec2 flow = texture(flowMap, flowUV).rg * 2.0 - 1.0;
-    flow = normalize(flow + flowDirection * 0.5);
+    // przeskalowanie z [0,1] na [-1,1]: 0.5 = brak przeplywu
+    vec2 flowBase = texture(flowMap, flowUV).rg * 2.0 - 1.0;
+    vec2 flow = normalize(flowBase * 0.3 + flowDirection * 0.7);
 
-    // Two phases offset by 0.5 to avoid a visible snap each cycle
+    // dwie fazy przesuniete o 0.5 zeby uniknac widocznego skoku co cykl
     float phase0 = fract(time * speed);
     float phase1 = fract(time * speed + 0.5);
 
     vec2 uv0 = texCoord - flow * phase0 * flowScale;
     vec2 uv1 = texCoord - flow * phase1 * flowScale;
 
-    // Triangle wave blend: smoothly crossfades the two phases instead of snapping
+    // plynne przenikanie miedzy fazami
     float blend = abs(phase0 * 2.0 - 1.0);
 
-    // kolor flow-distorted - przesuwa sie razem z normalną
+    // kolor flow-distorted - przesuwa sie razem z normalna
     vec4 c0 = texture(colorTexture, uv0);
     vec4 c1 = texture(colorTexture, uv1);
     vec4 texColor = mix(c0, c1, blend);
 
-    // sample normal map with same flow-distorted UVs and blend phases
+    // normalna z mapy normalnych z tymi samymi przesunietymi UV
     vec3 n0 = texture(normalMap, uv0).rgb * 2.0 - 1.0;
     vec3 n1 = texture(normalMap, uv1).rgb * 2.0 - 1.0;
     vec3 tangentNormal = normalize(mix(n0, n1, blend));
 
-    // TBN: tangent space → world space
+    // macierz TBN: przestrzen styczna -> przestrzen swiata
     mat3 TBN = mat3(
         normalize(worldTangent),
         normalize(worldBitangent),
@@ -93,7 +93,7 @@ void main()
     );
     vec3 normal = normalize(TBN * tangentNormal);
 
-    // Phong lighting (ambient + diffuse)
+    // oswietlenie Phonga (ambient + diffuse) z cieniami
     float diff = max(dot(normal, normalize(lightDir)), 0.0);
     float shadow = ShadowCalculation(fragPosLightSpace, normal, normalize(lightDir));
     vec3 ambient = 0.3 * lightColor;
@@ -115,7 +115,7 @@ void main()
         }
     }
 
-    // Exponential underwater fog: exp(-dist * density), 1=no fog, 0=full fog
+    // mgla podwodna: exp(-odleglosc * gestosc)
     float dist = length(worldPos - cameraPos);
     float fogFactor = clamp(exp(-dist * 0.04), 0.0, 1.0);
     vec3 fogColor = vec3(0.0, 0.15, 0.25);

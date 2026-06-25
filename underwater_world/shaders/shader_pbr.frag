@@ -17,17 +17,18 @@ uniform vec3 lightPos;
 uniform vec3 lightColor;
 uniform vec3 camPos;
 
-// --- LATARKA ---
+// latarka
 uniform bool spotOn;
 uniform vec3 spotPos;
 uniform vec3 spotDir;
 uniform float spotCutoff;
 uniform vec3 spotColor;
 uniform sampler2D shadowMap;
+uniform bool flipNormals;
 
 out vec4 outColor;
 
-// GGX Normal Distribution Function
+// rozklad normalnych GGX
 float distributionGGX(vec3 N, vec3 H, float roughness) {
     float a  = roughness * roughness;
     float a2 = a * a;
@@ -37,20 +38,21 @@ float distributionGGX(vec3 N, vec3 H, float roughness) {
     return a2 / (PI * denom * denom);
 }
 
-// Schlick-GGX Geometry Function
+// funkcja geometrii Schlick-GGX
 float geometrySchlickGGX(float NdotV, float roughness) {
     float r = roughness + 1.0;
     float k = (r * r) / 8.0;
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
-// Smith Geometry Function
+// funkcja geometrii Smitha
 float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
     return geometrySchlickGGX(NdotV, roughness) * geometrySchlickGGX(NdotL, roughness);
 }
 
+// obliczanie cieni z PCF
 float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
@@ -61,37 +63,38 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
     for(int x = -1; x <= 1; ++x) {
         for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
-        }    
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;
+        }
     }
     return shadow / 9.0;
 }
 
-// Fresnel - Schlick approximation
+// aproksymacja Fresnela (Schlick)
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 void main()
 {
-    // tekstury PBR
-    vec3  albedo    = pow(texture(albedoMap,     fragTexCoord).rgb, vec3(2.2));
-    float metallic  = texture(metallicMap,   fragTexCoord).r;
+    // odczyt tekstur PBR
+    vec3  albedo    = pow(texture(albedoMap, fragTexCoord).rgb, vec3(2.2));
+    float metallic  = texture(metallicMap, fragTexCoord).r;
     float roughness = clamp(texture(roughnessMap, fragTexCoord).r, 0.05, 1.0);
 
-    // normal mapa przez TBN z vertex shadera
+    // normalna z mapy normalnych przeksztalcona przez TBN
     vec3 tangentNormal = texture(normalMap, fragTexCoord).rgb * 2.0 - 1.0;
     vec3 N = normalize(TBN * tangentNormal);
+    if (flipNormals && !gl_FrontFacing) N = -N;
 
     vec3 V = normalize(camPos - fragPos);
-    vec3 L = normalize(lightPos - fragPos); // swiatlo punktowe
+    vec3 L = normalize(lightPos - fragPos);
     vec3 H = normalize(V + L);
 
-    // F0: bazowa reflektywnosc (dielektryk = 0.04, metal = kolor albedo)
+    // bazowa reflektywnosc (dielektryk = 0.04, metal = kolor albedo)
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    // Cook-Torrance BRDF
+    // BRDF Cook-Torrance
     float NDF = distributionGGX(N, H, roughness);
     float G   = geometrySmith(N, V, L, roughness);
     vec3  F   = fresnelSchlick(max(dot(H, V), 0.0), F0);
@@ -104,23 +107,21 @@ void main()
     vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
 
     float NdotL = max(dot(N, L), 0.0);
-    float shadow = ShadowCalculation(fragPosLightSpace, N, L); // Wyliczamy cień
-    vec3 Lo = (kD * albedo / PI + specular) * lightColor * NdotL * (1.0 - shadow); // Odejmujemy światło w cieniu
+    float shadow = ShadowCalculation(fragPosLightSpace, N, L);
+    vec3 Lo = (kD * albedo / PI + specular) * lightColor * NdotL * (1.0 - shadow);
 
-    // --- LATARKA ---
+    // latarka
     if (spotOn) {
         vec3 lightToFrag = normalize(spotPos - fragPos);
-        float theta = dot(lightToFrag, normalize(-spotDir)); 
-        
+        float theta = dot(lightToFrag, normalize(-spotDir));
+
         if (theta > spotCutoff) {
             float intensity = smoothstep(spotCutoff, spotCutoff + 0.05, theta);
             float distance = length(spotPos - fragPos);
             float attenuation = 1.0 / (1.0 + 0.04 * distance + 0.01 * (distance * distance));
 
             vec3 spotDiffuse = max(dot(N, lightToFrag), 0.0) * spotColor;
-            
-            // Wplatamy światło latarki bezpośrednio do równania jasności modelu
-            Lo += albedo * spotDiffuse * intensity * attenuation * 3.0; 
+            Lo += albedo * spotDiffuse * intensity * attenuation * 3.0;
         }
     }
 
@@ -128,7 +129,7 @@ void main()
     vec3 ambient = vec3(0.03) * albedo;
     vec3 color   = ambient + Lo;
 
-    // tone mapping (Reinhard) + gamma
+    // tone mapping Reinharda + korekcja gamma
     color = color / (color + vec3(1.0));
     color = pow(color, vec3(1.0 / 2.2));
 

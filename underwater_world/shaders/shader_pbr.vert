@@ -8,28 +8,28 @@ layout(location = 4) in vec3 vertexBitangent;
 
 uniform mat4 transformation;
 uniform mat4 modelMatrix;
-uniform mat4 lightSpaceMatrix; // DODANE: Macierz cieni
+uniform mat4 lightSpaceMatrix; // macierz cieni
 
 out vec3 fragPos;
 out vec3 fragNormal;
 out vec2 fragTexCoord;
 out mat3 TBN;
-out vec4 fragPosLightSpace; // DODANE: Wyjście do wyliczania cieni
+out vec4 fragPosLightSpace; // wyjscie do wyliczania cieni
 
 void main()
 {
     vec4 worldPosition = modelMatrix * vec4(vertexPosition, 1.0);
     gl_Position = transformation * vec4(vertexPosition, 1.0);
 
-    fragPos      = worldPosition.xyz;
-    fragNormal   = normalize((modelMatrix * vec4(vertexNormal, 0.0)).xyz);
+    fragPos = worldPosition.xyz;
+    fragNormal = normalize((modelMatrix * vec4(vertexNormal, 0.0)).xyz);
     fragTexCoord = vertexTexCoord;
 
-    vec3 T = normalize((modelMatrix * vec4(vertexTangent,    0.0)).xyz);
-    vec3 B = normalize((modelMatrix * vec4(vertexBitangent,  0.0)).xyz);
-    vec3 N = normalize((modelMatrix * vec4(vertexNormal,     0.0)).xyz);
+    vec3 T = normalize((modelMatrix * vec4(vertexTangent, 0.0)).xyz);
+    vec3 B = normalize((modelMatrix * vec4(vertexBitangent, 0.0)).xyz);
+    vec3 N = normalize((modelMatrix * vec4(vertexNormal, 0.0)).xyz);
     TBN = mat3(T, B, N);
 
-    // DODANE: Przekazanie pozycji w przestrzeni światła do shadera fragmentów
+    // obliczanie pozycji fragmentu w przestrzeni światła dla cieniowania
     fragPosLightSpace = lightSpaceMatrix * worldPosition; 
 }

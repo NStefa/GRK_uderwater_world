@@ -9,10 +9,12 @@ uniform mat4 modelMatrix;
 
 out vec2 texCoord;
 out vec3 worldNormal;
+out vec3 worldPos;
 
 void main()
 {
     gl_Position = transformation * vec4(vertexPosition, 1.0);
     texCoord = vertexTexCoord;
     worldNormal = normalize((modelMatrix * vec4(vertexNormal, 0.0)).xyz);
+    worldPos = (modelMatrix * vec4(vertexPosition, 1.0)).xyz;
 }

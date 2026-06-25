@@ -17,7 +17,7 @@
 #include <string>
 
 GLuint skyboxProgram; // cubemapa jako tlo sceny
-GLuint texProgram; // shader textury (delfin, ryby, nurek, koral) - brak PBR
+GLuint texProgram; // shader textury (wieloryby, ryby, wodorosty) - brak PBR
 GLuint flowmapProgram; // shader tekstury piasku z flowmapa (odchyla normalna w zaleznosci od pradu)
 GLuint normalFlowProgram; // shader tekstury z normalna odchylana przez flowmape
 GLuint pbrProgram; // shader PBR (wrak, skaly, kufer) - albedo + normal + metalic + roughness
@@ -56,9 +56,9 @@ std::vector<Core::RenderContext> boxMeshes;
 GLuint boxTexture;
 GLuint boxNormalTexture;
 
-// Delfin
-Core::RenderContext dolphinContext;
-GLuint dolphinTexture;
+// Wieloryb
+Core::RenderContext whaleContext;
+GLuint whaleTexture;
 
 // Ryby: 3 gatunki w wektorze (indeks odpowiada innemu gatunkowi)
 std::vector<Core::RenderContext> fishContexts;
@@ -66,10 +66,9 @@ std::vector<GLuint> fishTextures;
 
 // Koral
 Core::RenderContext coralContext;
-GLuint coralTexture;
-GLuint rockyTexture;          // Rock058 albedo
-GLuint rockyNormalTexture;    // Rock058 normalmapa
-GLuint rockyMetallicTexture;  // Rock058 metalicznosc (czarna = dielektryk)
+GLuint rockyTexture; // Rock058 albedo
+GLuint rockyNormalTexture; // Rock058 normalmapa
+GLuint rockyMetallicTexture; // Rock058 metalicznosc
 GLuint rockyRoughnessTexture; // Rock058 szorstkosci
 
 // Wodorosty
@@ -104,8 +103,8 @@ glm::vec2 targetFlowDir = glm::vec2(1.0f, 0.0f);
 glm::vec2 currentFlowDir = glm::vec2(1.0f, 0.0f);
 
 // Otwieranie/zamykanie wieczka kufra 
-float boxLidAngle = 0.0f;   //kat otwarcia (0 = zamkniety, 110 = otwarty)
-bool boxLidOpen = false;   // otwarty/zamkniety
+float boxLidAngle = 0.0f; //kat otwarcia (0 = zamkniety, 110 = otwarty)
+bool boxLidOpen = false; // otwarty/zamkniety
 
 const glm::vec3 BOX_LID_PIVOT = glm::vec3(-19.9f, 22.7f, 0.0f);
 
@@ -114,25 +113,38 @@ bool spotOn = false;
 
 // PTF i Ryba 
 std::vector<glm::vec3> baseControlPoints = {
-    glm::vec3(1.0f,  3.5f, -2.0f),
-    glm::vec3(6.0f,  4.0f, -3.5f),
-    glm::vec3(7.0f,  3.8f, -6.5f),
-    glm::vec3(3.0f,  4.2f, -9.0f),
-    glm::vec3(-1.0f,  3.7f, -7.0f),
-    glm::vec3(-0.5f,  3.5f, -3.5f)
+    glm::vec3(1.0f, 3.5f, -2.0f),
+    glm::vec3(6.0f, 4.0f, -3.5f),
+    glm::vec3(7.0f, 3.8f, -6.5f),
+    glm::vec3(3.0f, 4.2f, -9.0f),
+    glm::vec3(-1.0f, 3.7f, -7.0f),
+    glm::vec3(-0.5f, 3.5f, -3.5f)
 };
 std::vector<glm::vec3> controlPoints = baseControlPoints;
 std::vector<glm::vec3> currentOffsets(6, glm::vec3(0.0f));
 std::vector<glm::vec3> targetOffsets(6, glm::vec3(0.0f));
 
-glm::vec3 previousT(0.0f, 0.0f, 1.0f);
-glm::vec3 previousN(0.0f, 1.0f, 0.0f);
-bool isFirstFrame = true;
-
 float currentFishSpeed = 0.5f;
 float accumulatedFishTime = 0.0f;
 glm::vec3 lastFishPos = baseControlPoints[0];
 bool wasScared = false;
+
+// Wieloryby - ruch po elipsach z ucieczką
+struct WhaleState {
+    glm::vec3 center;
+    float radiusX, radiusZ;
+    float height;
+    float speed;
+    float phase;
+    float currentSpeed;
+    glm::vec3 lastPos;
+};
+
+WhaleState whales[3] = {
+    { glm::vec3( 15.f, 7.0f,  5.f), 10.f, 8.f, 7.0f, 0.15f, 0.f,   0.15f, glm::vec3(0.f) },
+    { glm::vec3(-15.f, 8.5f, -30.f), 8.f, 12.f, 8.5f, 0.12f, 2.5f, 0.12f, glm::vec3(0.f) },
+    { glm::vec3( 20.f, 6.0f, -35.f), 14.f, 6.f, 6.0f, 0.18f, 4.8f, 0.18f, glm::vec3(0.f) },
+};
 
 float skyboxVertices[] = {
     -1.0f,  1.0f, -1.0f,   -1.0f, -1.0f, -1.0f,    1.0f, -1.0f, -1.0f,
@@ -428,7 +440,7 @@ void drawSkybox()
     glUseProgram(0);
 }
 
-// Funkcja: rysuje cala scene 3D (dno, wrak, kufer, skaly, delfiny, ryby, nurek, koral, skybox)
+// Funkcja: rysuje cala scene 3D (dno, wrak, kufer, skaly, delfiny, ryby, koral, skybox)
 void renderScene(GLFWwindow* window)
 {
     glClearColor(0.0f, 0.15f, 0.25f, 1.0f);
@@ -475,7 +487,41 @@ void renderScene(GLFWwindow* window)
         Core::DrawContext(mesh);
     }
 
-    // Normalne renderowanie (Dla kamery)
+    // Kufer dla mapy cieni
+    const glm::vec3 boxWorldPos = glm::vec3(17.f, -1.f, -14.f);
+    glm::mat4 boxBase = glm::translate(glm::mat4(1.0f), boxWorldPos);
+    boxBase = glm::rotate(boxBase, glm::radians(210.f), glm::vec3(0.f, 1.f, 0.f));
+    boxBase = glm::scale(boxBase, glm::vec3(0.02f));
+    glm::mat4 lidRot = glm::translate(glm::mat4(1.0f), BOX_LID_PIVOT)
+        * glm::rotate(glm::mat4(1.0f), glm::radians(boxLidAngle), glm::vec3(0.0f, 0.0f, 1.0f))
+        * glm::translate(glm::mat4(1.0f), -BOX_LID_PIVOT);
+    for (int i = 0; i < (int)boxMeshes.size(); i++) {
+        glm::mat4 meshModel = (i == 14) ? boxBase * lidRot : boxBase;
+        glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "model"), 1, GL_FALSE, glm::value_ptr(meshModel));
+        Core::DrawContext(boxMeshes[i]);
+    }
+
+    // Skaly dla mapy cieni
+    auto drawRockShadow = [&](glm::vec3 pos, float rotY, float scale = 1.f) {
+        glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
+        m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
+        m = glm::scale(m, glm::vec3(scale));
+        glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "model"), 1, GL_FALSE, glm::value_ptr(m));
+        Core::DrawContext(rockContext);
+    };
+    drawRockShadow(glm::vec3(4.f, -1.f, -12.f), 0.f, 1.2f);
+    drawRockShadow(glm::vec3(-3.f, -1.f, -14.f), 45.f, 0.9f);
+    drawRockShadow(glm::vec3(6.f, -1.f, -20.f), 90.f, 1.5f);
+    drawRockShadow(glm::vec3(-5.f, -1.f, -22.f), 130.f, 1.1f);
+    drawRockShadow(glm::vec3(2.f, -1.f, -25.f), 200.f, 0.8f);
+    drawRockShadow(glm::vec3(-10.f, -1.f, -10.f), 60.f, 5.0f);
+    drawRockShadow(glm::vec3(-20.f, -1.f, -10.f), 110.f, 5.0f);
+    drawRockShadow(glm::vec3(-17.f, -1.f, -10.f), 40.f, 5.0f);
+    drawRockShadow(glm::vec3(-18.f, -1.f, -15.f), 170.f, 2.0f);
+    drawRockShadow(glm::vec3(-17.f, -1.f, -12.f), 310.f, 3.0f);
+    drawRockShadow(glm::vec3(-18.f, -1.f, -15.f), 55.f, 1.0f);
+
+	// Normalne obiekty dla mapy cieni (delfiny, ryby, koral)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
@@ -489,28 +535,23 @@ void renderScene(GLFWwindow* window)
     for (auto& mesh : wreckMeshes)
         drawPBR(mesh, wreckModel, wreckTexture, metalNormalTexture, metalMetallicTexture, metalRoughnessTexture);
 
-    // kufer (otwiera sie przy zblizeniu) - przy rafie koralu
-    const glm::vec3 boxWorldPos = glm::vec3(17.f, -1.f, -14.f);
-    glm::mat4 boxBase = glm::translate(glm::mat4(1.0f), boxWorldPos);
-    boxBase = glm::rotate(boxBase, glm::radians(210.f), glm::vec3(0.f, 1.f, 0.f));
-    boxBase = glm::scale(boxBase, glm::vec3(0.02f));
-    glm::mat4 lidRot = glm::translate(glm::mat4(1.0f), BOX_LID_PIVOT)
-        * glm::rotate(glm::mat4(1.0f), glm::radians(boxLidAngle), glm::vec3(0.0f, 0.0f, 1.0f))
-        * glm::translate(glm::mat4(1.0f), -BOX_LID_PIVOT);
-
+    // kufer - kolor staly, tylko normalne znieksztalcane pradem
     bindShadowMap(normalFlowProgram);
+    glUniform1i(glGetUniformLocation(normalFlowProgram, "flowColor"), 0);
     for (int i = 0; i < (int)boxMeshes.size(); i++) {
         glm::mat4 meshModel = (i == 14) ? boxBase * lidRot : boxBase;
         drawNormalFlow(boxMeshes[i], meshModel, flowmapTexture, boxTexture, boxNormalTexture);
     }
 
-    // skaly
+    // skaly - kolor i normalne znieksztalcane pradem
+    glUniform1i(glGetUniformLocation(normalFlowProgram, "flowColor"), 1);
     auto drawRock = [&](glm::vec3 pos, float rotY, float scale = 1.f) {
         glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
         m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
         m = glm::scale(m, glm::vec3(scale));
         drawNormalFlow(rockContext, m, flowmapTexture, rockTexture, rockNormalTexture);
         };
+
     // skaly przy wraku
     drawRock(glm::vec3(4.f, -1.f, -12.f), 0.f, 1.2f);
     drawRock(glm::vec3(-3.f, -1.f, -14.f), 45.f, 0.9f);
@@ -527,16 +568,44 @@ void renderScene(GLFWwindow* window)
     drawRock(glm::vec3(-18.f, -1.f, -15.f), 55.f, 1.0f);
 
     bindShadowMap(texProgram);
-    // delfiny
-    auto makeDolphin = [&](glm::vec3 pos, float rotY = 0.f) {
+    // wieloryby - ruch po elipsach z ucieczką
+    for (int di = 0; di < 3; di++) {
+        WhaleState& d = whales[di];
+        float distToCam = glm::distance(cameraPos, d.lastPos);
+        float targetSpeed = d.speed;
+        if (distToCam < 5.0f) targetSpeed = d.speed * 3.0f;
+
+        d.currentSpeed = glm::mix(d.currentSpeed, targetSpeed, deltaTime * 2.0f);
+        d.phase += deltaTime * d.currentSpeed;
+
+        float bob = sin(d.phase * 3.0f) * 0.3f;
+        glm::vec3 pos = d.center + glm::vec3(
+            cos(d.phase) * d.radiusX,
+            bob,
+            sin(d.phase) * d.radiusZ
+        );
+        d.lastPos = pos;
+
+        glm::vec3 nextPos = d.center + glm::vec3(
+            cos(d.phase + 0.05f) * d.radiusX,
+            0.f,
+            sin(d.phase + 0.05f) * d.radiusZ
+        );
+        glm::vec3 dir = glm::normalize(nextPos - pos);
+        float yaw = atan2(dir.x, dir.z);
+
+        float roll = -sin(d.phase) * 0.2f;
+        float pitch = cos(d.phase * 3.0f) * 0.1f;
+
         glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
-        m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
+        m = glm::rotate(m, yaw, glm::vec3(0.f, 1.f, 0.f));
+        m = glm::rotate(m, pitch, glm::vec3(1.f, 0.f, 0.f));
+        m = glm::rotate(m, roll, glm::vec3(0.f, 0.f, 1.f));
         m = glm::scale(m, glm::vec3(0.012f));
-        drawTex(dolphinContext, m, dolphinTexture);
-        };
-    makeDolphin(glm::vec3(-4.f, 2.5f, -10.f), 30.f);
-    makeDolphin(glm::vec3(5.f, 3.0f, -14.f), 200.f);
-    makeDolphin(glm::vec3(-2.f, 2.0f, -20.f), 150.f);
+        m = glm::rotate(m, glm::radians(90.0f), glm::vec3(0.f, 1.f, 0.f));
+        m = glm::rotate(m, glm::radians(-90.0f), glm::vec3(1.f, 0.f, 0.f));
+        drawTex(whaleContext, m, whaleTexture);
+    }
 
     // ryby statyczne 
     struct FishPlacement { Core::RenderContext* ctx; GLuint tex; glm::vec3 pos; float rotY; float scale; };
@@ -639,16 +708,20 @@ void renderScene(GLFWwindow* window)
 
     glm::mat4 dynamicFishModel = ptfMatrix * localModel;
 
-    // Rysowanie
+	// Rysowanie ryby z PTF
     drawTex(fishContexts[0], dynamicFishModel, fishTextures[0]);
 
     bindShadowMap(pbrProgram);
-    // koral 1 - odwrocony jako skala
+    glUniform1i(glGetUniformLocation(pbrProgram, "flipNormals"), 0);
+
+	// koral 1 - odwrocony, wlaczamy flipNormals (latarka widoczna od spodu)
+    glUniform1i(glGetUniformLocation(pbrProgram, "flipNormals"), 1);
     glm::mat4 coralModel = glm::translate(glm::mat4(1.0f), glm::vec3(8.f, 4.f, -16.f));
     coralModel = glm::rotate(coralModel, glm::radians(180.f), glm::vec3(1.f, 0.f, 0.f));
     coralModel = glm::rotate(coralModel, glm::radians(45.f), glm::vec3(0.f, 1.f, 0.f));
     coralModel = glm::scale(coralModel, glm::vec3(0.7f));
     drawPBR(coralContext, coralModel, rockyTexture, rockyNormalTexture, rockyMetallicTexture, rockyRoughnessTexture);
+    glUniform1i(glGetUniformLocation(pbrProgram, "flipNormals"), 0);
 
     // koral 2 - za wrakiem, poprawnie zorientowany (rosnie z dna)
     glm::mat4 coralModel2 = glm::translate(glm::mat4(1.0f), glm::vec3(-20.f, -5.f, -24.f));
@@ -680,12 +753,14 @@ void renderScene(GLFWwindow* window)
     glfwSwapBuffers(window);
 }
 
+// Funkcja: callback zmiany rozmiaru okna
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
     aspectRatio = width / float(height);
     glViewport(0, 0, width, height);
 }
 
+// Funkcja: callback ruchu myszy
 void init(GLFWwindow* window)
 {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -719,10 +794,10 @@ void init(GLFWwindow* window)
 
     // dno
     float planeVertices[] = {
-        -25.f,-1.f,-25.f,   0.f,1.f,0.f,   0.f,  0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
-         25.f,-1.f,-25.f,   0.f,1.f,0.f,   10.f, 0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
-         25.f,-1.f, 25.f,   0.f,1.f,0.f,   10.f, 10.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
-        -25.f,-1.f, 25.f,   0.f,1.f,0.f,   0.f,  10.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
+       -100.f,-1.f,-100.f,  0.f,1.f,0.f,   0.f,  0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
+        100.f,-1.f,-100.f,  0.f,1.f,0.f,   40.f, 0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
+        100.f,-1.f, 100.f,  0.f,1.f,0.f,   40.f, 40.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
+       -100.f,-1.f, 100.f,  0.f,1.f,0.f,   0.f,  40.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
     };
     unsigned int planeIndices[] = { 0,1,2,  0,2,3 };
 
@@ -746,7 +821,7 @@ void init(GLFWwindow* window)
     loadAllMeshes("models/ship/Boat Texture 1.obj", wreckMeshes);
     loadMesh("models/rock/sasso14.obj", rockContext);
     loadAllMeshes("models/box/chest_low.obj", boxMeshes);
-    loadMesh("models/dolphin/10014_dolphin_v2_max2011_it2.obj", dolphinContext);
+    loadMesh("models/whale/10054_Whale_v2_L3.obj", whaleContext);
     fishContexts.resize(3);
     loadMesh("models/fish/12265_Fish_v1_L2.obj", fishContexts[0]);
     loadMesh("models/fish2/fish.obj", fishContexts[1]);
@@ -756,8 +831,8 @@ void init(GLFWwindow* window)
 
     // tekstury
     flowmapTexture = Core::loadTexture("textures/flowmap.png");
-    sandTexture = Core::loadTexture("textures/sand/Ground080_4K-PNG_Color.png");
-    sandNormalTexture = Core::loadTexture("textures/sand/Ground080_4K-PNG_NormalGL.png");
+    sandTexture       = Core::loadTexture("textures/sand/Ground080_1K-PNG_Color.png");
+    sandNormalTexture = Core::loadTexture("textures/sand/Ground080_1K-PNG_NormalGL.png");
     wreckTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Color.png");
     metalNormalTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_NormalGL.png");
     metalMetallicTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Metalness.png");
@@ -766,13 +841,12 @@ void init(GLFWwindow* window)
     rockNormalTexture = Core::loadTexture("models/rock/normal.jpg");
     boxTexture = Core::loadTexture("models/box/default_albedo.jpg");
     boxNormalTexture = Core::loadTexture("models/box/default_normal.png");
-    dolphinTexture = Core::loadTexture("models/dolphin/10014_dolphin_v1_Diffuse.jpg");
+    whaleTexture = Core::loadTexture("models/whale/10054_Whale_Diffuse_v2.jpg");
     fishTextures.resize(3);
     fishTextures[0] = Core::loadTexture("models/fish/fish.jpg");
     fishTextures[1] = Core::loadTexture("models/fish2/fish.png");
     fishTextures[2] = Core::loadTexture("models/fish3/13004_Bicolor_Blenny_v1_diff.jpg");
 
-    coralTexture = Core::loadTexture("models/coral/SfM04_001cc.jpg");
     rockyTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Color.png");
     rockyNormalTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_NormalGL.png");
     rockyMetallicTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Metalness.png");
@@ -799,6 +873,7 @@ void init(GLFWwindow* window)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+// Funkcja: zwalnianie zasobów
 void shutdown(GLFWwindow* window)
 {
     shaderLoader.DeleteProgram(skyboxProgram);
@@ -809,6 +884,7 @@ void shutdown(GLFWwindow* window)
     shaderLoader.DeleteProgram(shadowDepthProgram);
 }
 
+// Funkcja: przetwarzanie wejścia z klawiatury
 void processInput(GLFWwindow* window)
 {
     // TAB: przelacz widocznosc kursora
@@ -851,10 +927,10 @@ void processInput(GLFWwindow* window)
 
     // Strzałki dla prądu
     glm::vec2 inputDir = glm::vec2(0.0f);
-    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)    inputDir.y += 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)  inputDir.y -= 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) inputDir.y += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) inputDir.y -= 1.0f;
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) inputDir.x += 1.0f;
-    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)  inputDir.x -= 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) inputDir.x -= 1.0f;
 
     if (glm::length(inputDir) > 0.01f) {
         targetFlowDir = glm::normalize(inputDir);
@@ -897,6 +973,7 @@ void processInput(GLFWwindow* window)
     cameraPos.y = glm::max(cameraPos.y, -1.0f + 0.2f);
 }
 
+// Funkcja: główna pętla renderowania
 void renderLoop(GLFWwindow* window) {
     while (!glfwWindowShouldClose(window))
     {
