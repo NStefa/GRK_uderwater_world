@@ -6,6 +6,9 @@ in vec3 worldPos;
 in vec3 worldTangent;
 in vec3 worldBitangent;
 
+in vec4 fragPosLightSpace;
+uniform sampler2D shadowMap;
+
 uniform sampler2D flowMap;
 uniform sampler2D colorTexture;
 uniform sampler2D normalMap;
@@ -19,13 +22,48 @@ uniform float speed;
 uniform float flowScale;
 uniform float flowMapScale;
 
+uniform bool spotOn;
+uniform vec3 spotPos;
+uniform vec3 spotDir;
+uniform float spotCutoff;
+uniform vec3 spotColor;
+
+uniform vec2 flowDirection;
+
 out vec4 outColor;
+
+float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir)
+{
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords = projCoords * 0.5 + 0.5;
+
+    if(projCoords.z > 1.0)
+        return 0.0;
+
+    float bias = max(0.005 * (1.0 - dot(normal, lightDir)), 0.001);
+    float currentDepth = projCoords.z;
+
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    for(int x = -1; x <= 1; ++x)
+    {
+        for(int y = -1; y <= 1; ++y)
+        {
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
+            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
+        }    
+    }
+    shadow /= 9.0; 
+
+    return shadow;
+}
 
 void main()
 {
     vec2 flowUV = texCoord * flowMapScale;
     // Remap [0,1] -> [-1,1]: 0.5 = no flow, 0.0 = max left, 1.0 = max right
     vec2 flow = texture(flowMap, flowUV).rg * 2.0 - 1.0;
+    flow = normalize(flow + flowDirection * 0.5);
 
     // Two phases offset by 0.5 to avoid a visible snap each cycle
     float phase0 = fract(time * speed);
@@ -57,9 +95,25 @@ void main()
 
     // Phong lighting (ambient + diffuse)
     float diff = max(dot(normal, normalize(lightDir)), 0.0);
-    vec3 ambient = 0.2 * lightColor;
-    vec3 diffuse = diff * lightColor * 0.5;
+    float shadow = ShadowCalculation(fragPosLightSpace, normal, normalize(lightDir));
+    vec3 ambient = 0.3 * lightColor;
+    vec3 diffuse = diff * lightColor * (1.0 - shadow);
     vec3 litColor = (ambient + diffuse) * texColor.rgb;
+
+    if (spotOn) {
+        vec3 lightToFrag = normalize(spotPos - worldPos);
+        float theta = dot(lightToFrag, normalize(-spotDir)); 
+        
+        if (theta > spotCutoff) {
+            float intensity = smoothstep(spotCutoff, spotCutoff + 0.05, theta);
+            float distance = length(spotPos - worldPos);
+            float attenuation = 1.0 / (1.0 + 0.04 * distance + 0.01 * (distance * distance));
+
+            vec3 spotDiffuse = max(dot(normal, lightToFrag), 0.0) * spotColor;
+            
+            litColor += texColor.rgb * spotDiffuse * intensity * attenuation * 3.0; 
+        }
+    }
 
     // Exponential underwater fog: exp(-dist * density), 1=no fog, 0=full fog
     float dist = length(worldPos - cameraPos);

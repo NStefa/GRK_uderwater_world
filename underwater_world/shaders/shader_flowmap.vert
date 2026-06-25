@@ -9,6 +9,9 @@ layout(location = 4) in vec3 vertexBitangent;
 uniform mat4 transformation;
 uniform mat4 modelMatrix;
 
+uniform mat4 lightSpaceMatrix;
+out vec4 fragPosLightSpace;
+
 out vec2 texCoord;
 out vec3 worldNormal;
 out vec3 worldPos;
@@ -25,4 +28,6 @@ void main()
     worldTangent   = normalize((modelMatrix * vec4(vertexTangent,   0.0)).xyz);
     worldBitangent = normalize((modelMatrix * vec4(vertexBitangent, 0.0)).xyz);
     worldPos = worldPosition.xyz;
+
+    fragPosLightSpace = lightSpaceMatrix * worldPosition;
 }

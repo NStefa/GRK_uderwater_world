@@ -6,6 +6,7 @@ in vec3 fragPos;
 in vec3 fragNormal;
 in vec2 fragTexCoord;
 in mat3 TBN;
+in vec4 fragPosLightSpace;
 
 uniform sampler2D albedoMap;
 uniform sampler2D normalMap;
@@ -15,6 +16,14 @@ uniform sampler2D roughnessMap;
 uniform vec3 lightPos;
 uniform vec3 lightColor;
 uniform vec3 camPos;
+
+// --- LATARKA ---
+uniform bool spotOn;
+uniform vec3 spotPos;
+uniform vec3 spotDir;
+uniform float spotCutoff;
+uniform vec3 spotColor;
+uniform sampler2D shadowMap;
 
 out vec4 outColor;
 
@@ -40,6 +49,23 @@ float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
     return geometrySchlickGGX(NdotV, roughness) * geometrySchlickGGX(NdotL, roughness);
+}
+
+float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    if(projCoords.z > 1.0) return 0.0;
+    float bias = max(0.005 * (1.0 - dot(normal, lightDir)), 0.001);
+    float currentDepth = projCoords.z;
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    for(int x = -1; x <= 1; ++x) {
+        for(int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 
+            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
+        }    
+    }
+    return shadow / 9.0;
 }
 
 // Fresnel - Schlick approximation
@@ -78,7 +104,25 @@ void main()
     vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
 
     float NdotL = max(dot(N, L), 0.0);
-    vec3 Lo = (kD * albedo / PI + specular) * lightColor * NdotL;
+    float shadow = ShadowCalculation(fragPosLightSpace, N, L); // Wyliczamy cień
+    vec3 Lo = (kD * albedo / PI + specular) * lightColor * NdotL * (1.0 - shadow); // Odejmujemy światło w cieniu
+
+    // --- LATARKA ---
+    if (spotOn) {
+        vec3 lightToFrag = normalize(spotPos - fragPos);
+        float theta = dot(lightToFrag, normalize(-spotDir)); 
+        
+        if (theta > spotCutoff) {
+            float intensity = smoothstep(spotCutoff, spotCutoff + 0.05, theta);
+            float distance = length(spotPos - fragPos);
+            float attenuation = 1.0 / (1.0 + 0.04 * distance + 0.01 * (distance * distance));
+
+            vec3 spotDiffuse = max(dot(N, lightToFrag), 0.0) * spotColor;
+            
+            // Wplatamy światło latarki bezpośrednio do równania jasności modelu
+            Lo += albedo * spotDiffuse * intensity * attenuation * 3.0; 
+        }
+    }
 
     // ambient podwodny
     vec3 ambient = vec3(0.03) * albedo;

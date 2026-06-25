@@ -8,11 +8,13 @@ layout(location = 4) in vec3 vertexBitangent;
 
 uniform mat4 transformation;
 uniform mat4 modelMatrix;
+uniform mat4 lightSpaceMatrix; // DODANE: Macierz cieni
 
 out vec3 fragPos;
 out vec3 fragNormal;
 out vec2 fragTexCoord;
 out mat3 TBN;
+out vec4 fragPosLightSpace; // DODANE: Wyjście do wyliczania cieni
 
 void main()
 {
@@ -27,4 +29,7 @@ void main()
     vec3 B = normalize((modelMatrix * vec4(vertexBitangent,  0.0)).xyz);
     vec3 N = normalize((modelMatrix * vec4(vertexNormal,     0.0)).xyz);
     TBN = mat3(T, B, N);
+
+    // DODANE: Przekazanie pozycji w przestrzeni światła do shadera fragmentów
+    fragPosLightSpace = lightSpaceMatrix * worldPosition; 
 }

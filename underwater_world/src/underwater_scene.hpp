@@ -22,8 +22,15 @@ GLuint flowmapProgram; // shader tekstury piasku z flowmapa (odchyla normalna w 
 GLuint normalFlowProgram; // shader tekstury z normalna odchylana przez flowmape
 GLuint pbrProgram; // shader PBR (wrak, skaly, kufer) - albedo + normal + metalic + roughness
 
+// Shadow Mapping
+GLuint shadowDepthProgram;
+GLuint depthMapFBO;
+GLuint depthMap;
+const unsigned int SHADOW_WIDTH = 2048, SHADOW_HEIGHT = 2048;
+glm::mat4 lightSpaceMatrix;
+
 // Skybox
-GLuint skyboxVAO, skyboxVBO; 
+GLuint skyboxVAO, skyboxVBO;
 GLuint skyboxTexture; // cubemapa 6 scian: px/nx/py/ny/pz/nz
 
 // Dno
@@ -56,7 +63,6 @@ GLuint dolphinTexture;
 // Ryby: 3 gatunki w wektorze (indeks odpowiada innemu gatunkowi)
 std::vector<Core::RenderContext> fishContexts;
 std::vector<GLuint> fishTextures;
-
 
 // Koral
 Core::RenderContext coralContext;
@@ -93,11 +99,40 @@ const float FLOW_SPEED_DEFAULT = 0.05f;
 float flowSpeed = FLOW_SPEED_DEFAULT;
 float flowScale = 0.2f;
 
+// Kierunek prądu wodnego 
+glm::vec2 targetFlowDir = glm::vec2(1.0f, 0.0f);
+glm::vec2 currentFlowDir = glm::vec2(1.0f, 0.0f);
+
 // Otwieranie/zamykanie wieczka kufra 
 float boxLidAngle = 0.0f;   //kat otwarcia (0 = zamkniety, 110 = otwarty)
 bool boxLidOpen = false;   // otwarty/zamkniety
 
 const glm::vec3 BOX_LID_PIVOT = glm::vec3(-19.9f, 22.7f, 0.0f);
+
+// Latarka
+bool spotOn = false;
+
+// PTF i Ryba 
+std::vector<glm::vec3> baseControlPoints = {
+    glm::vec3(1.0f,  3.5f, -2.0f),
+    glm::vec3(6.0f,  4.0f, -3.5f),
+    glm::vec3(7.0f,  3.8f, -6.5f),
+    glm::vec3(3.0f,  4.2f, -9.0f),
+    glm::vec3(-1.0f,  3.7f, -7.0f),
+    glm::vec3(-0.5f,  3.5f, -3.5f)
+};
+std::vector<glm::vec3> controlPoints = baseControlPoints;
+std::vector<glm::vec3> currentOffsets(6, glm::vec3(0.0f));
+std::vector<glm::vec3> targetOffsets(6, glm::vec3(0.0f));
+
+glm::vec3 previousT(0.0f, 0.0f, 1.0f);
+glm::vec3 previousN(0.0f, 1.0f, 0.0f);
+bool isFirstFrame = true;
+
+float currentFishSpeed = 0.5f;
+float accumulatedFishTime = 0.0f;
+glm::vec3 lastFishPos = baseControlPoints[0];
+bool wasScared = false;
 
 float skyboxVertices[] = {
     -1.0f,  1.0f, -1.0f,   -1.0f, -1.0f, -1.0f,    1.0f, -1.0f, -1.0f,
@@ -113,6 +148,52 @@ float skyboxVertices[] = {
     -1.0f, -1.0f, -1.0f,   -1.0f, -1.0f,  1.0f,    1.0f, -1.0f, -1.0f,
      1.0f, -1.0f, -1.0f,   -1.0f, -1.0f,  1.0f,    1.0f, -1.0f,  1.0f
 };
+
+
+static void loadMesh(const std::string& path, Core::RenderContext& ctx, int meshIndex = 0);
+static void loadAllMeshes(const std::string& path, std::vector<Core::RenderContext>& meshes);
+
+// Pomocnicza funkcja do wczytywania modelu OBJ przez Assimp
+static void loadMesh(const std::string& path, Core::RenderContext& ctx, int meshIndex) {
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path,
+        aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace);
+    if (scene && (int)scene->mNumMeshes > meshIndex)
+        ctx.initFromAssimpMesh(scene->mMeshes[meshIndex]);
+    else
+        std::cout << "Failed to load: " << path << " — " << importer.GetErrorString() << std::endl;
+}
+
+static void loadAllMeshes(const std::string& path, std::vector<Core::RenderContext>& meshes) {
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path,
+        aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace);
+    if (!scene) { std::cout << "Failed to load: " << path << " — " << importer.GetErrorString() << std::endl; return; }
+    meshes.resize(scene->mNumMeshes);
+    for (unsigned int i = 0; i < scene->mNumMeshes; i++)
+        meshes[i].initFromAssimpMesh(scene->mMeshes[i]);
+}
+
+// Funkcje krzywej Catmull-Rom
+glm::vec3 catmullRom(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t) {
+    float t2 = t * t;
+    float t3 = t2 * t;
+    return 0.5f * (
+        (2.0f * p1) +
+        (-p0 + p2) * t +
+        (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+        (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3
+        );
+}
+
+glm::vec3 catmullRomTangent(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t) {
+    float t2 = t * t;
+    return 0.5f * (
+        (-p0 + p2) +
+        2.0f * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t +
+        3.0f * (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t2
+        );
+}
 
 // Funkcja: ruch kamery w zaleznosci od czasu (deltaTime) i klawiszy WSAD
 void updateDeltaTime(float time) {
@@ -148,7 +229,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     const float pitchLimit = glm::radians(89.f);
     cameraPitch = glm::clamp(cameraPitch, -pitchLimit, pitchLimit);
 
-    glm::quat yawQuat = glm::angleAxis(cameraYaw,   glm::vec3(0.f, 1.f, 0.f));
+    glm::quat yawQuat = glm::angleAxis(cameraYaw, glm::vec3(0.f, 1.f, 0.f));
     glm::quat pitchQuat = glm::angleAxis(cameraPitch, glm::vec3(1.f, 0.f, 0.f));
     cameraOrientation = yawQuat * pitchQuat;
 }
@@ -157,7 +238,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 glm::mat4 createCameraMatrix()
 {
     glm::vec3 forward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
-    glm::vec3 up      = glm::rotate(cameraOrientation, glm::vec3(0.f, 1.f,  0.f));
+    glm::vec3 up = glm::rotate(cameraOrientation, glm::vec3(0.f, 1.f, 0.f));
     return Core::createViewMatrix(cameraPos, forward, up);
 }
 
@@ -171,17 +252,17 @@ glm::mat4 createPerspectiveMatrix()
         0,  aspectRatio, 0, 0,
         0,  0,  (f + n) / (n - f), 2 * f * n / (n - f),
         0,  0,  -1, 0,
-    });
+        });
     return glm::transpose(perspectiveMatrix);
 }
 
 // Funkcja: rysuje plaszczyzne dna (kolor statyczny, normalna flow-distorted)
-void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, 
-                 GLuint normalTex, float flowMapScale = 0.05f) {
+void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex,
+    GLuint normalTex, float flowMapScale = 0.05f) {
     if (!context.vertexArray) return;
 
     glUseProgram(flowmapProgram);
-	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
+    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
     glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
     glUniformMatrix4fv(glGetUniformLocation(flowmapProgram, "modelMatrix"), 1, GL_FALSE, (float*)&modelMatrix);
 
@@ -192,6 +273,8 @@ void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flo
     glUniform1f(glGetUniformLocation(flowmapProgram, "speed"), flowSpeed);
     glUniform1f(glGetUniformLocation(flowmapProgram, "flowScale"), flowScale);
     glUniform1f(glGetUniformLocation(flowmapProgram, "flowMapScale"), flowMapScale);
+
+    glUniform2f(glGetUniformLocation(flowmapProgram, "flowDirection"), currentFlowDir.x, currentFlowDir.y);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, flowMap);
@@ -205,20 +288,27 @@ void drawFlowmap(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flo
     glBindTexture(GL_TEXTURE_2D, normalTex);
     glUniform1i(glGetUniformLocation(flowmapProgram, "normalMap"), 2);
 
+    glm::vec3 camForward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
+    glUniform1i(glGetUniformLocation(flowmapProgram, "spotOn"), spotOn ? 1 : 0);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "spotPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform3f(glGetUniformLocation(flowmapProgram, "spotDir"), camForward.x, camForward.y, camForward.z);
+    glUniform1f(glGetUniformLocation(flowmapProgram, "spotCutoff"), glm::cos(glm::radians(15.0f)));
+    glUniform3f(glGetUniformLocation(flowmapProgram, "spotColor"), 1.0f, 1.0f, 0.8f);
+
     Core::DrawContext(context);
     glUseProgram(0);
 }
 
 // Funkcja: rysuje obiekt 3D (kolor statyczny, normalna flow-distorted dla skaly, wraku, kufera)
-void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex, 
-                    GLuint normalTex, float flowMapScale = 1.0f) {
+void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint flowMap, GLuint colorTex,
+    GLuint normalTex, float flowMapScale = 1.0f) {
     if (!context.vertexArray) return;
 
     glUseProgram(normalFlowProgram);
-	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
+    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
 
     glUniformMatrix4fv(glGetUniformLocation(normalFlowProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
-    glUniformMatrix4fv(glGetUniformLocation(normalFlowProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
+    glUniformMatrix4fv(glGetUniformLocation(normalFlowProgram, "modelMatrix"), 1, GL_FALSE, (float*)&modelMatrix);
 
     glUniform3f(glGetUniformLocation(normalFlowProgram, "lightDir"), lightDir.x, lightDir.y, lightDir.z);
     glUniform3f(glGetUniformLocation(normalFlowProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
@@ -227,6 +317,8 @@ void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint 
     glUniform1f(glGetUniformLocation(normalFlowProgram, "speed"), flowSpeed);
     glUniform1f(glGetUniformLocation(normalFlowProgram, "flowScale"), flowScale);
     glUniform1f(glGetUniformLocation(normalFlowProgram, "flowMapScale"), flowMapScale);
+
+    glUniform2f(glGetUniformLocation(normalFlowProgram, "flowDirection"), currentFlowDir.x, currentFlowDir.y);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, flowMap);
@@ -240,20 +332,27 @@ void drawNormalFlow(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint 
     glBindTexture(GL_TEXTURE_2D, normalTex);
     glUniform1i(glGetUniformLocation(normalFlowProgram, "normalMap"), 2);
 
+    glm::vec3 camForward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
+    glUniform1i(glGetUniformLocation(normalFlowProgram, "spotOn"), spotOn ? 1 : 0);
+    glUniform3f(glGetUniformLocation(normalFlowProgram, "spotPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform3f(glGetUniformLocation(normalFlowProgram, "spotDir"), camForward.x, camForward.y, camForward.z);
+    glUniform1f(glGetUniformLocation(normalFlowProgram, "spotCutoff"), glm::cos(glm::radians(15.0f)));
+    glUniform3f(glGetUniformLocation(normalFlowProgram, "spotColor"), 1.0f, 1.0f, 0.8f);
+
     Core::DrawContext(context);
     glUseProgram(0);
 }
 
 // Funkcja: rysuje obiekt 3D z PBR (albedo + normal + metallic + roughness)
 void drawPBR(Core::RenderContext& context, glm::mat4 modelMatrix,
-             GLuint albedo, GLuint normal, GLuint metallic, GLuint roughness) {
+    GLuint albedo, GLuint normal, GLuint metallic, GLuint roughness) {
     if (!context.vertexArray) return;
 
     glUseProgram(pbrProgram);
 
-	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
+    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
     glUniformMatrix4fv(glGetUniformLocation(pbrProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
-    glUniformMatrix4fv(glGetUniformLocation(pbrProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
+    glUniformMatrix4fv(glGetUniformLocation(pbrProgram, "modelMatrix"), 1, GL_FALSE, (float*)&modelMatrix);
 
     glUniform3f(glGetUniformLocation(pbrProgram, "lightPos"), lightPos.x, lightPos.y, lightPos.z);
     glUniform3f(glGetUniformLocation(pbrProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
@@ -268,6 +367,13 @@ void drawPBR(Core::RenderContext& context, glm::mat4 modelMatrix,
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, roughness);
     glUniform1i(glGetUniformLocation(pbrProgram, "roughnessMap"), 3);
 
+    glm::vec3 camForward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
+    glUniform1i(glGetUniformLocation(pbrProgram, "spotOn"), spotOn ? 1 : 0);
+    glUniform3f(glGetUniformLocation(pbrProgram, "spotPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform3f(glGetUniformLocation(pbrProgram, "spotDir"), camForward.x, camForward.y, camForward.z);
+    glUniform1f(glGetUniformLocation(pbrProgram, "spotCutoff"), glm::cos(glm::radians(15.0f)));
+    glUniform3f(glGetUniformLocation(pbrProgram, "spotColor"), 1.0f, 1.0f, 0.8f);
+
     Core::DrawContext(context);
     glUseProgram(0);
 }
@@ -278,15 +384,24 @@ void drawTex(Core::RenderContext& context, glm::mat4 modelMatrix, GLuint colorTe
 
     glUseProgram(texProgram);
 
-	glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix; // macierz transformacji: projekcja * widok * model
+    glm::mat4 transformation = createPerspectiveMatrix() * createCameraMatrix() * modelMatrix;
     glUniformMatrix4fv(glGetUniformLocation(texProgram, "transformation"), 1, GL_FALSE, (float*)&transformation);
-    glUniformMatrix4fv(glGetUniformLocation(texProgram, "modelMatrix"),    1, GL_FALSE, (float*)&modelMatrix);
+    glUniformMatrix4fv(glGetUniformLocation(texProgram, "modelMatrix"), 1, GL_FALSE, (float*)&modelMatrix);
 
     glUniform3f(glGetUniformLocation(texProgram, "lightDir"), lightDir.x, lightDir.y, lightDir.z);
     glUniform3f(glGetUniformLocation(texProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+    glUniform3f(glGetUniformLocation(texProgram, "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, colorTex);
     glUniform1i(glGetUniformLocation(texProgram, "colorTexture"), 0);
+
+    glm::vec3 camForward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
+    glUniform1i(glGetUniformLocation(texProgram, "spotOn"), spotOn ? 1 : 0);
+    glUniform3f(glGetUniformLocation(texProgram, "spotPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform3f(glGetUniformLocation(texProgram, "spotDir"), camForward.x, camForward.y, camForward.z);
+    glUniform1f(glGetUniformLocation(texProgram, "spotCutoff"), glm::cos(glm::radians(15.0f)));
+    glUniform3f(glGetUniformLocation(texProgram, "spotColor"), 1.0f, 1.0f, 0.8f);
+
     Core::DrawContext(context);
     glUseProgram(0);
 }
@@ -320,16 +435,57 @@ void renderScene(GLFWwindow* window)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     updateDeltaTime(glfwGetTime());
 
+    currentFlowDir = glm::mix(currentFlowDir, targetFlowDir, deltaTime * 2.0f);
+
+    glm::mat4 lightProjection = glm::ortho(-20.0f, 20.0f, -20.0f, 20.0f, 1.0f, 35.0f);
+    glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f, -2.0f, -5.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    lightSpaceMatrix = lightProjection * lightView;
+
+    glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    glUseProgram(shadowDepthProgram);
+    glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+
     // dno
     Core::RenderContext planeCtx;
     planeCtx.vertexArray = planeVAO;
     planeCtx.size = 6;
-    drawFlowmap(planeCtx, glm::mat4(1.0f), flowmapTexture, sandTexture, sandNormalTexture);
 
-    // wrak
+    // Przekazywanie mapy cieni do programow
+    auto bindShadowMap = [&](GLuint prog) {
+        glUseProgram(prog);
+        glUniformMatrix4fv(glGetUniformLocation(prog, "lightSpaceMatrix"), 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+        glUniform1i(glGetUniformLocation(prog, "shadowMap"), 4);
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, depthMap);
+        };
+
+    // Zapis do mapy cieni
+    glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+    Core::DrawContext(planeCtx);
+
+    // Wrak dla mapy cieni
     glm::mat4 wreckModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.f, -1.f, -18.f));
     wreckModel = glm::rotate(wreckModel, glm::radians(21.f), glm::vec3(0.f, 1.f, 0.f));
     wreckModel = glm::scale(wreckModel, glm::vec3(0.019f));
+    for (auto& mesh : wreckMeshes) {
+        glUniformMatrix4fv(glGetUniformLocation(shadowDepthProgram, "model"), 1, GL_FALSE, glm::value_ptr(wreckModel));
+        Core::DrawContext(mesh);
+    }
+
+    // Normalne renderowanie (Dla kamery)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+    glViewport(0, 0, width, height);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    bindShadowMap(flowmapProgram);
+    drawFlowmap(planeCtx, glm::mat4(1.0f), flowmapTexture, sandTexture, sandNormalTexture);
+
+    bindShadowMap(pbrProgram);
     for (auto& mesh : wreckMeshes)
         drawPBR(mesh, wreckModel, wreckTexture, metalNormalTexture, metalMetallicTexture, metalRoughnessTexture);
 
@@ -338,9 +494,11 @@ void renderScene(GLFWwindow* window)
     glm::mat4 boxBase = glm::translate(glm::mat4(1.0f), boxWorldPos);
     boxBase = glm::rotate(boxBase, glm::radians(210.f), glm::vec3(0.f, 1.f, 0.f));
     boxBase = glm::scale(boxBase, glm::vec3(0.02f));
-    glm::mat4 lidRot = glm::translate(glm::mat4(1.0f),  BOX_LID_PIVOT)
-                     * glm::rotate(glm::mat4(1.0f), glm::radians(boxLidAngle), glm::vec3(0.0f, 0.0f, 1.0f))
-                     * glm::translate(glm::mat4(1.0f), -BOX_LID_PIVOT);
+    glm::mat4 lidRot = glm::translate(glm::mat4(1.0f), BOX_LID_PIVOT)
+        * glm::rotate(glm::mat4(1.0f), glm::radians(boxLidAngle), glm::vec3(0.0f, 0.0f, 1.0f))
+        * glm::translate(glm::mat4(1.0f), -BOX_LID_PIVOT);
+
+    bindShadowMap(normalFlowProgram);
     for (int i = 0; i < (int)boxMeshes.size(); i++) {
         glm::mat4 meshModel = (i == 14) ? boxBase * lidRot : boxBase;
         drawNormalFlow(boxMeshes[i], meshModel, flowmapTexture, boxTexture, boxNormalTexture);
@@ -352,61 +510,143 @@ void renderScene(GLFWwindow* window)
         m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
         m = glm::scale(m, glm::vec3(scale));
         drawNormalFlow(rockContext, m, flowmapTexture, rockTexture, rockNormalTexture);
-    };
+        };
     // skaly przy wraku
-    drawRock(glm::vec3( 4.f, -1.f, -12.f),   0.f, 1.2f);
-    drawRock(glm::vec3(-3.f, -1.f, -14.f),  45.f, 0.9f);
-    drawRock(glm::vec3( 6.f, -1.f, -20.f),  90.f, 1.5f);
+    drawRock(glm::vec3(4.f, -1.f, -12.f), 0.f, 1.2f);
+    drawRock(glm::vec3(-3.f, -1.f, -14.f), 45.f, 0.9f);
+    drawRock(glm::vec3(6.f, -1.f, -20.f), 90.f, 1.5f);
     drawRock(glm::vec3(-5.f, -1.f, -22.f), 130.f, 1.1f);
-    drawRock(glm::vec3( 2.f, -1.f, -25.f), 200.f, 0.8f);
+    drawRock(glm::vec3(2.f, -1.f, -25.f), 200.f, 0.8f);
 
     // skaly po lewej
-    drawRock(glm::vec3(-10.f,  -1.f, -10.f), 60.f, 5.0f);
+    drawRock(glm::vec3(-10.f, -1.f, -10.f), 60.f, 5.0f);
     drawRock(glm::vec3(-20.f, -1.f, -10.f), 110.f, 5.0f);
-    drawRock(glm::vec3(-17.f,  -1.f, -10.f),  40.f, 5.0f);
+    drawRock(glm::vec3(-17.f, -1.f, -10.f), 40.f, 5.0f);
     drawRock(glm::vec3(-18.f, -1.f, -15.f), 170.f, 2.0f);
     drawRock(glm::vec3(-17.f, -1.f, -12.f), 310.f, 3.0f);
-    drawRock(glm::vec3(-18.f, -1.f, -15.f),  55.f, 1.0f);
+    drawRock(glm::vec3(-18.f, -1.f, -15.f), 55.f, 1.0f);
 
+    bindShadowMap(texProgram);
     // delfiny
     auto makeDolphin = [&](glm::vec3 pos, float rotY = 0.f) {
         glm::mat4 m = glm::translate(glm::mat4(1.f), pos);
         m = glm::rotate(m, glm::radians(rotY), glm::vec3(0.f, 1.f, 0.f));
         m = glm::scale(m, glm::vec3(0.012f));
         drawTex(dolphinContext, m, dolphinTexture);
-    };
-    makeDolphin(glm::vec3(-4.f, 2.5f, -10.f),  30.f);
-    makeDolphin(glm::vec3( 5.f, 3.0f, -14.f), 200.f);
+        };
+    makeDolphin(glm::vec3(-4.f, 2.5f, -10.f), 30.f);
+    makeDolphin(glm::vec3(5.f, 3.0f, -14.f), 200.f);
     makeDolphin(glm::vec3(-2.f, 2.0f, -20.f), 150.f);
 
-    // ryby
+    // ryby statyczne 
     struct FishPlacement { Core::RenderContext* ctx; GLuint tex; glm::vec3 pos; float rotY; float scale; };
     FishPlacement fish[] = {
-        // fish[0] - mala tropikalna
-        { &fishContexts[0], fishTextures[0], {-7.f, -0.6f, -13.f},   0.f, 0.05f },
-        { &fishContexts[0], fishTextures[0], {-9.f, -0.4f, -16.f},  60.f, 0.05f },
-        { &fishContexts[0], fishTextures[0], {-6.f,  0.2f, -17.f}, 120.f, 0.05f },
-        // fish[1] - sredni
         { &fishContexts[1], fishTextures[1], { 3.f, -0.5f,  -8.f},  90.f, 0.05f  },
         { &fishContexts[1], fishTextures[1], {-1.f,  0.3f, -10.f}, 210.f, 0.06f  },
         { &fishContexts[1], fishTextures[1], { 5.f, -0.3f, -15.f}, 300.f, 0.05f  },
         { &fishContexts[1], fishTextures[1], { 1.f,  0.5f, -12.f},  45.f, 0.06f  },
-        // fish[2] - mala
         { &fishContexts[2], fishTextures[2], {-3.f, -0.5f, -11.f}, 180.f, 0.05f },
         { &fishContexts[2], fishTextures[2], { 4.f,  0.1f, -13.f}, 270.f, 0.05f },
         { &fishContexts[2], fishTextures[2], {-5.f,  0.4f, -19.f},  90.f, 0.05f },
     };
+
+    float currentTime = (float)glfwGetTime();
+    int fishIndex = 0; 
+
     for (auto& f : fish) {
-        glm::mat4 m = glm::translate(glm::mat4(1.f), f.pos);
+        // Unoszenie się w wodzie (pływanie góra/dół)
+        float floatDy = sin(currentTime * 1.2f + fishIndex * 1.5f) * 0.1f;
+        glm::vec3 finalPos = f.pos + glm::vec3(0.0f, floatDy, 0.0f);
+
+        glm::mat4 m = glm::translate(glm::mat4(1.f), finalPos);
+
         m = glm::rotate(m, glm::radians(f.rotY), glm::vec3(0.f, 1.f, 0.f));
+
+        if (f.ctx == &fishContexts[2]) {
+            m = glm::rotate(m, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        }
+
+        float wiggle = sin(currentTime * 6.0f + fishIndex * 2.0f) * 0.08f;
+        m = glm::rotate(m, wiggle, glm::vec3(0.0f, 1.0f, 0.0f));
+
         m = glm::scale(m, glm::vec3(f.scale));
         drawTex(*f.ctx, m, f.tex);
-    }
 
+        fishIndex++;
+    }
+    // Ryba z PTF i ucieczką 
+    float totalLength = (float)controlPoints.size();
+    float distToCamera = glm::distance(cameraPos, lastFishPos);
+    float targetSpeed = 0.5f;
+    bool isScared = (distToCamera < 3.0f);
+
+    if (isScared) {
+        targetSpeed = 1.5f;
+        if (!wasScared) {
+            for (size_t i = 0; i < controlPoints.size(); i++) {
+                targetOffsets[i].x = ((rand() % 100) / 100.0f - 0.5f) * 3.0f;
+                targetOffsets[i].z = ((rand() % 100) / 100.0f - 0.5f) * 3.0f;
+            }
+        }
+    }
+    else {
+        for (size_t i = 0; i < controlPoints.size(); i++) targetOffsets[i] = glm::vec3(0.0f);
+    }
+    wasScared = isScared;
+
+    for (size_t i = 0; i < controlPoints.size(); i++) {
+        currentOffsets[i] = glm::mix(currentOffsets[i], targetOffsets[i], deltaTime * 1.5f);
+        controlPoints[i] = baseControlPoints[i] + currentOffsets[i];
+    }
+    currentFishSpeed = glm::mix(currentFishSpeed, targetSpeed, deltaTime * 2.0f);
+    accumulatedFishTime += deltaTime * currentFishSpeed;
+
+    float timeMod = fmod(accumulatedFishTime, totalLength);
+    int index = (int)timeMod;
+    float t = timeMod - index;
+
+    glm::vec3 p0_c = controlPoints[(index - 1 + controlPoints.size()) % controlPoints.size()];
+    glm::vec3 p1_c = controlPoints[index];
+    glm::vec3 p2_c = controlPoints[(index + 1) % controlPoints.size()];
+    glm::vec3 p3_c = controlPoints[(index + 2) % controlPoints.size()];
+
+    glm::vec3 pos = catmullRom(p0_c, p1_c, p2_c, p3_c, t);
+    lastFishPos = pos;
+    glm::vec3 T = glm::normalize(catmullRomTangent(p0_c, p1_c, p2_c, p3_c, t));
+
+
+    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    glm::vec3 B = glm::normalize(glm::cross(T, worldUp));
+    glm::vec3 N = glm::normalize(glm::cross(B, T));
+    glm::mat4 localModel = glm::mat4(1.0f);
+
+    localModel = glm::scale(localModel, glm::vec3(0.05f));
+    localModel = glm::rotate(localModel, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    localModel = glm::rotate(localModel, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+    float wiggleAmplitude = 0.2f;
+    float wiggleFrequency = 15.0f;
+    float yawAngle = (float)sin(glfwGetTime() * wiggleFrequency) * wiggleAmplitude;
+    localModel = glm::rotate(localModel, yawAngle, glm::vec3(0.0f, 0.0f, 1.0f));
+
+    glm::mat4 ptfMatrix = glm::mat4(
+        glm::vec4(B, 0.0f),
+        glm::vec4(N, 0.0f),
+        glm::vec4(T, 0.0f),
+        glm::vec4(pos, 1.0f)
+    );
+
+    glm::mat4 dynamicFishModel = ptfMatrix * localModel;
+
+    // Rysowanie
+    drawTex(fishContexts[0], dynamicFishModel, fishTextures[0]);
+
+    bindShadowMap(pbrProgram);
     // koral 1 - odwrocony jako skala
     glm::mat4 coralModel = glm::translate(glm::mat4(1.0f), glm::vec3(8.f, 4.f, -16.f));
     coralModel = glm::rotate(coralModel, glm::radians(180.f), glm::vec3(1.f, 0.f, 0.f));
-    coralModel = glm::rotate(coralModel, glm::radians(45.f),  glm::vec3(0.f, 1.f, 0.f));
+    coralModel = glm::rotate(coralModel, glm::radians(45.f), glm::vec3(0.f, 1.f, 0.f));
     coralModel = glm::scale(coralModel, glm::vec3(0.7f));
     drawPBR(coralContext, coralModel, rockyTexture, rockyNormalTexture, rockyMetallicTexture, rockyRoughnessTexture);
 
@@ -417,6 +657,7 @@ void renderScene(GLFWwindow* window)
     drawPBR(coralContext, coralModel2, rockyTexture, rockyNormalTexture, rockyMetallicTexture, rockyRoughnessTexture);
 
     // wodorosty przy skrzyni
+    bindShadowMap(texProgram);
     {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -427,7 +668,7 @@ void renderScene(GLFWwindow* window)
             m = glm::scale(m, glm::vec3(scale));
             for (auto& mesh : seaweedMeshes)
                 drawTex(mesh, m, seaweedTexture);
-        };
+            };
         drawSeaweed(glm::vec3(18.f, -1.f, -12.5f), 30.f, 0.5f);
         drawSeaweed(glm::vec3(16.f, -1.f, -15.5f), 210.f, 0.5f);
 
@@ -445,27 +686,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
-// Pomocnicza funkcja do wczytywania modelu OBJ przez Assimp
-static void loadMesh(const std::string& path, Core::RenderContext& ctx, int meshIndex = 0) {
-    Assimp::Importer importer;
-    const aiScene* scene = importer.ReadFile(path,
-        aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace);
-    if (scene && (int)scene->mNumMeshes > meshIndex)
-        ctx.initFromAssimpMesh(scene->mMeshes[meshIndex]);
-    else
-        std::cout << "Failed to load: " << path << " — " << importer.GetErrorString() << std::endl;
-}
-
-static void loadAllMeshes(const std::string& path, std::vector<Core::RenderContext>& meshes) {
-    Assimp::Importer importer;
-    const aiScene* scene = importer.ReadFile(path,
-        aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace);
-    if (!scene) { std::cout << "Failed to load: " << path << " — " << importer.GetErrorString() << std::endl; return; }
-    meshes.resize(scene->mNumMeshes);
-    for (unsigned int i = 0; i < scene->mNumMeshes; i++)
-        meshes[i].initFromAssimpMesh(scene->mMeshes[i]);
-}
-
 void init(GLFWwindow* window)
 {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -474,11 +694,12 @@ void init(GLFWwindow* window)
     glEnable(GL_DEPTH_TEST);
 
     // shadery
-    skyboxProgram     = shaderLoader.CreateProgram("shaders/shader_skybox.vert",          "shaders/shader_skybox.frag");
-    texProgram        = shaderLoader.CreateProgram("shaders/shader_tex.vert",             "shaders/shader_tex.frag");
-    flowmapProgram    = shaderLoader.CreateProgram("shaders/shader_flowmap.vert",         "shaders/shader_flowmap.frag");
-    normalFlowProgram = shaderLoader.CreateProgram("shaders/shader_normalmap_flow.vert",  "shaders/shader_normalmap_flow.frag");
-    pbrProgram        = shaderLoader.CreateProgram("shaders/shader_pbr.vert",             "shaders/shader_pbr.frag");
+    skyboxProgram = shaderLoader.CreateProgram("shaders/shader_skybox.vert", "shaders/shader_skybox.frag");
+    texProgram = shaderLoader.CreateProgram("shaders/shader_tex.vert", "shaders/shader_tex.frag");
+    flowmapProgram = shaderLoader.CreateProgram("shaders/shader_flowmap.vert", "shaders/shader_flowmap.frag");
+    normalFlowProgram = shaderLoader.CreateProgram("shaders/shader_normalmap_flow.vert", "shaders/shader_normalmap_flow.frag");
+    pbrProgram = shaderLoader.CreateProgram("shaders/shader_pbr.vert", "shaders/shader_pbr.frag");
+    shadowDepthProgram = shaderLoader.CreateProgram("shaders/shader_shadowdepth.vert", "shaders/shader_shadowdepth.frag");
 
     // skybox VAO
     glGenVertexArrays(1, &skyboxVAO);
@@ -494,11 +715,10 @@ void init(GLFWwindow* window)
         "textures/skybox/px.png", "textures/skybox/nx.png",
         "textures/skybox/py.png", "textures/skybox/ny.png",
         "textures/skybox/pz.png", "textures/skybox/nz.png"
-    });
+        });
 
-    // dno: pozycja(3) + normalna(3) + uv(2) + tangent(3) + bitangent(3) = stride 14
+    // dno
     float planeVertices[] = {
-        // pozycja              // normalna      // uv          // tangent     // bitangent
         -25.f,-1.f,-25.f,   0.f,1.f,0.f,   0.f,  0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
          25.f,-1.f,-25.f,   0.f,1.f,0.f,   10.f, 0.f,   1.f,0.f,0.f,   0.f,0.f,-1.f,
          25.f,-1.f, 25.f,   0.f,1.f,0.f,   10.f, 10.f,  1.f,0.f,0.f,   0.f,0.f,-1.f,
@@ -516,50 +736,67 @@ void init(GLFWwindow* window)
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(planeIndices), planeIndices, GL_STATIC_DRAW);
     int stride = 14 * sizeof(float);
     glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
-    glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3  * sizeof(float)));
-    glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6  * sizeof(float)));
-    glEnableVertexAttribArray(3); glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8  * sizeof(float)));
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(3); glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
     glEnableVertexAttribArray(4); glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)(11 * sizeof(float)));
     glBindVertexArray(0);
 
     // modele
     loadAllMeshes("models/ship/Boat Texture 1.obj", wreckMeshes);
-    loadMesh("models/rock/sasso14.obj",           rockContext);
-    loadAllMeshes("models/box/chest_low.obj",      boxMeshes);
+    loadMesh("models/rock/sasso14.obj", rockContext);
+    loadAllMeshes("models/box/chest_low.obj", boxMeshes);
     loadMesh("models/dolphin/10014_dolphin_v2_max2011_it2.obj", dolphinContext);
     fishContexts.resize(3);
-    loadMesh("models/fish/12265_Fish_v1_L2.obj",                       fishContexts[0]);
-    loadMesh("models/fish2/fish.obj",                                  fishContexts[1]);
-    loadMesh("models/fish3/13007_Blue-Green_Reef_Chromis_v2_l3.obj",   fishContexts[2]);
+    loadMesh("models/fish/12265_Fish_v1_L2.obj", fishContexts[0]);
+    loadMesh("models/fish2/fish.obj", fishContexts[1]);
+    loadMesh("models/fish3/13007_Blue-Green_Reef_Chromis_v2_l3.obj", fishContexts[2]);
 
     loadMesh("models/coral/SfM04_001b.obj", coralContext);
 
     // tekstury
-    flowmapTexture    = Core::loadTexture("textures/flowmap.png");
-    sandTexture       = Core::loadTexture("textures/sand/Ground080_1K-PNG_Color.png");
-    sandNormalTexture = Core::loadTexture("textures/sand/Ground080_1K-PNG_NormalGL.png");
-    wreckTexture          = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Color.png");
-    metalNormalTexture    = Core::loadTexture("textures/metal/Metal053C_1K-PNG_NormalGL.png");
-    metalMetallicTexture  = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Metalness.png");
+    flowmapTexture = Core::loadTexture("textures/flowmap.png");
+    sandTexture = Core::loadTexture("textures/sand/Ground080_4K-PNG_Color.png");
+    sandNormalTexture = Core::loadTexture("textures/sand/Ground080_4K-PNG_NormalGL.png");
+    wreckTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Color.png");
+    metalNormalTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_NormalGL.png");
+    metalMetallicTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Metalness.png");
     metalRoughnessTexture = Core::loadTexture("textures/metal/Metal053C_1K-PNG_Roughness.png");
-    rockTexture       = Core::loadTexture("models/rock/sasso14.jpg");
+    rockTexture = Core::loadTexture("models/rock/sasso14.jpg");
     rockNormalTexture = Core::loadTexture("models/rock/normal.jpg");
-    boxTexture        = Core::loadTexture("models/box/default_albedo.jpg");
-    boxNormalTexture  = Core::loadTexture("models/box/default_normal.png");
-    dolphinTexture    = Core::loadTexture("models/dolphin/10014_dolphin_v1_Diffuse.jpg");
+    boxTexture = Core::loadTexture("models/box/default_albedo.jpg");
+    boxNormalTexture = Core::loadTexture("models/box/default_normal.png");
+    dolphinTexture = Core::loadTexture("models/dolphin/10014_dolphin_v1_Diffuse.jpg");
     fishTextures.resize(3);
     fishTextures[0] = Core::loadTexture("models/fish/fish.jpg");
     fishTextures[1] = Core::loadTexture("models/fish2/fish.png");
     fishTextures[2] = Core::loadTexture("models/fish3/13004_Bicolor_Blenny_v1_diff.jpg");
 
-    coralTexture      = Core::loadTexture("models/coral/SfM04_001cc.jpg");
-    rockyTexture          = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Color.png");
-    rockyNormalTexture    = Core::loadTexture("textures/rocky/Rock058_1K-PNG_NormalGL.png");
-    rockyMetallicTexture  = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Metalness.png");
+    coralTexture = Core::loadTexture("models/coral/SfM04_001cc.jpg");
+    rockyTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Color.png");
+    rockyNormalTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_NormalGL.png");
+    rockyMetallicTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Metalness.png");
     rockyRoughnessTexture = Core::loadTexture("textures/rocky/Rock058_1K-PNG_Roughness.png");
 
     loadAllMeshes("models/seaweed/seaweedList.obj", seaweedMeshes);
     seaweedTexture = Core::loadTexture("models/seaweed/seaweed_diffuse.png");
+
+    // SHADOW MAPPING FBO
+    glGenFramebuffers(1, &depthMapFBO);
+    glGenTextures(1, &depthMap);
+    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void shutdown(GLFWwindow* window)
@@ -569,6 +806,7 @@ void shutdown(GLFWwindow* window)
     shaderLoader.DeleteProgram(flowmapProgram);
     shaderLoader.DeleteProgram(normalFlowProgram);
     shaderLoader.DeleteProgram(pbrProgram);
+    shaderLoader.DeleteProgram(shadowDepthProgram);
 }
 
 void processInput(GLFWwindow* window)
@@ -596,13 +834,31 @@ void processInput(GLFWwindow* window)
     bool keyR = glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
 
     if (key1 && !key1Was) flowSpeed = glm::max(0.01f, flowSpeed - 0.05f);
-    if (key2 && !key2Was) flowSpeed = glm::min(1.0f,  flowSpeed + 0.05f);
+    if (key2 && !key2Was) flowSpeed = glm::min(1.0f, flowSpeed + 0.05f);
     if (key3 && !key3Was) flowScale = glm::max(0.01f, flowScale - 0.05f);
-    if (key4 && !key4Was) flowScale = glm::min(1.0f,  flowScale + 0.05f);
+    if (key4 && !key4Was) flowScale = glm::min(1.0f, flowScale + 0.05f);
     if (keyR && !keyRWas) { flowSpeed = FLOW_SPEED_DEFAULT; flowScale = 0.2f; }
 
     key1Was = key1; key2Was = key2; key3Was = key3; key4Was = key4; keyRWas = keyR;
 
+    // L: włącz/wyłącz latarkę 
+    static bool keyLWas = false;
+    bool keyL = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+    if (keyL && !keyLWas) {
+        spotOn = !spotOn;
+    }
+    keyLWas = keyL;
+
+    // Strzałki dla prądu
+    glm::vec2 inputDir = glm::vec2(0.0f);
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)    inputDir.y += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)  inputDir.y -= 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) inputDir.x += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)  inputDir.x -= 1.0f;
+
+    if (glm::length(inputDir) > 0.01f) {
+        targetFlowDir = glm::normalize(inputDir);
+    }
 
     // skrzynia otwiera sie automatycznie przy zblizeniu kamery
     const glm::vec3 boxWorldPos = glm::vec3(17.f, -1.f, -14.f);
@@ -617,14 +873,14 @@ void processInput(GLFWwindow* window)
 
     // animacja wieczka: plynne przejscie do celu (110 stopni = otwarte)
     float lidTarget = boxLidOpen ? 110.0f : 0.0f;
-    float lidSpeed  = 90.0f * deltaTime; // stopni na sekunde
+    float lidSpeed = 90.0f * deltaTime; // stopni na sekunde
     if (boxLidAngle < lidTarget) boxLidAngle = glm::min(boxLidAngle + lidSpeed, lidTarget);
     if (boxLidAngle > lidTarget) boxLidAngle = glm::max(boxLidAngle - lidSpeed, lidTarget);
 
     // ruch kamery (WASD + QE, SHIFT = sprint)
     glm::vec3 forward = glm::rotate(cameraOrientation, glm::vec3(0.f, 0.f, -1.f));
-    glm::vec3 right   = glm::rotate(cameraOrientation, glm::vec3(1.f, 0.f,  0.f));
-    glm::vec3 up      = glm::vec3(0.f, 1.f, 0.f);
+    glm::vec3 right = glm::rotate(cameraOrientation, glm::vec3(1.f, 0.f, 0.f));
+    glm::vec3 up = glm::vec3(0.f, 1.f, 0.f);
 
     float moveSpeed = 1.5f * deltaTime;
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
@@ -632,10 +888,10 @@ void processInput(GLFWwindow* window)
 
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cameraPos += forward * moveSpeed;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cameraPos -= forward * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += right   * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cameraPos -= right   * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) cameraPos += up      * moveSpeed;
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) cameraPos -= up      * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += right * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cameraPos -= right * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) cameraPos += up * moveSpeed;
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) cameraPos -= up * moveSpeed;
 
     // kamera nie wychodzi ponizej podlogi
     cameraPos.y = glm::max(cameraPos.y, -1.0f + 0.2f);
