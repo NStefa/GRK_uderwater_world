@@ -129,6 +129,11 @@ float accumulatedFishTime = 0.0f;
 glm::vec3 lastFishPos = baseControlPoints[0];
 bool wasScared = false;
 
+// Zmienne potrzebne do poprawnego PTF
+glm::vec3 previousT(0.0f, 0.0f, 1.0f);
+glm::vec3 previousN(0.0f, 1.0f, 0.0f);
+bool isFirstFrame = true;
+
 // Wieloryby - ruch po elipsach z ucieczką
 struct WhaleState {
     glm::vec3 center;
@@ -440,7 +445,7 @@ void drawSkybox()
     glUseProgram(0);
 }
 
-// Funkcja: rysuje cala scene 3D (dno, wrak, kufer, skaly, delfiny, ryby, koral, skybox)
+// Funkcja: rysuje cala scene 3D (dno, wrak, kufer, skaly, wieloryby, ryby, koral, skybox)
 void renderScene(GLFWwindow* window)
 {
     glClearColor(0.0f, 0.15f, 0.25f, 1.0f);
@@ -521,7 +526,7 @@ void renderScene(GLFWwindow* window)
     drawRockShadow(glm::vec3(-17.f, -1.f, -12.f), 310.f, 3.0f);
     drawRockShadow(glm::vec3(-18.f, -1.f, -15.f), 55.f, 1.0f);
 
-	// Normalne obiekty dla mapy cieni (delfiny, ryby, koral)
+	// Normalne obiekty dla mapy cieni (wieloryby, ryby, koral)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
@@ -684,15 +689,40 @@ void renderScene(GLFWwindow* window)
     glm::vec3 T = glm::normalize(catmullRomTangent(p0_c, p1_c, p2_c, p3_c, t));
 
 
-    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (isFirstFrame) {
+        previousT = T;
+        glm::vec3 tempUp = glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::vec3 B_init = glm::normalize(glm::cross(T, tempUp));
+        previousN = glm::normalize(glm::cross(B_init, T));
+        isFirstFrame = false;
+    }
 
-    glm::vec3 B = glm::normalize(glm::cross(T, worldUp));
-    glm::vec3 N = glm::normalize(glm::cross(B, T));
+    glm::vec3 axis = glm::cross(previousT, T);
+    float dotProd = glm::clamp(glm::dot(previousT, T), -1.0f, 1.0f);
+
+    glm::vec3 N;
+    if (glm::length(axis) > 0.0001f) {
+        axis = glm::normalize(axis);
+        float angle = acos(dotProd);
+        glm::mat4 rot = glm::rotate(glm::mat4(1.0f), angle, axis);
+        N = glm::vec3(rot * glm::vec4(previousN, 0.0f));
+    }
+    else {
+        N = previousN;
+    }
+    N = glm::normalize(N);
+
+    glm::vec3 B = glm::normalize(glm::cross(T, N));
+
+    previousT = T;
+    previousN = N;
+
     glm::mat4 localModel = glm::mat4(1.0f);
 
     localModel = glm::scale(localModel, glm::vec3(0.05f));
     localModel = glm::rotate(localModel, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     localModel = glm::rotate(localModel, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    localModel = glm::rotate(localModel, glm::radians(-15.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
     float wiggleAmplitude = 0.2f;
     float wiggleFrequency = 15.0f;
@@ -760,7 +790,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
-// Funkcja: callback ruchu myszy
 void init(GLFWwindow* window)
 {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
