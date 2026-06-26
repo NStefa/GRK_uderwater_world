@@ -673,7 +673,11 @@ void renderScene(GLFWwindow* window)
         controlPoints[i] = baseControlPoints[i] + currentOffsets[i];
     }
     currentFishSpeed = glm::mix(currentFishSpeed, targetSpeed, deltaTime * 2.0f);
+    float prevFishTime = accumulatedFishTime;
     accumulatedFishTime += deltaTime * currentFishSpeed;
+
+    if (fmod(accumulatedFishTime, totalLength) < fmod(prevFishTime, totalLength))
+        isFirstFrame = true;
 
     float timeMod = fmod(accumulatedFishTime, totalLength);
     int index = (int)timeMod;
@@ -722,7 +726,7 @@ void renderScene(GLFWwindow* window)
     localModel = glm::scale(localModel, glm::vec3(0.05f));
     localModel = glm::rotate(localModel, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     localModel = glm::rotate(localModel, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-    localModel = glm::rotate(localModel, glm::radians(-15.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    localModel = glm::rotate(localModel, glm::radians(15.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
     float wiggleAmplitude = 0.2f;
     float wiggleFrequency = 15.0f;
